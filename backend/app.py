@@ -28,12 +28,13 @@ def create_app():
     from models import EmployeeMapping, Project, FileRecord, ChatMessage, ProjectChatroom, KeywordCategory
 
     # 导入API路由蓝图
-    from routes import employees_bp, projects_bp, files_bp, dashboard_bp, chatlog_bp
+    from routes import employees_bp, projects_bp, files_bp, dashboard_bp, chatlog_bp, sync_bp
     app.register_blueprint(employees_bp)
     app.register_blueprint(projects_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(chatlog_bp)
+    app.register_blueprint(sync_bp)
 
     @app.route('/', methods=['GET'])
     def index():

@@ -6,11 +6,13 @@ from .projects import projects_bp
 from .files import files_bp
 from .dashboard import dashboard_bp
 from .chatlog import chatlog_bp
+from .sync import sync_bp
 
 __all__ = [
     'employees_bp',
     'projects_bp', 
     'files_bp',
     'dashboard_bp',
-    'chatlog_bp'
+    'chatlog_bp',
+    'sync_bp'
 ] 
