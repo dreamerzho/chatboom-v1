@@ -5,7 +5,7 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 // 通用响应接口
-interface ApiResponse<T = any> {
+interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -106,6 +106,55 @@ interface ValidationResult {
   errors?: string[];
 }
 
+// 同步相关接口
+interface SyncStatus {
+  status: string;
+  message: string;
+  timestamp: string;
+  api_base: string;
+}
+
+interface Chatroom {
+  id: string;
+  name: string;
+  member_count?: number;
+  created_at?: string;
+}
+
+interface SyncRequest {
+  start_date: string;
+  end_date: string;
+  sync_type?: 'all' | 'chat' | 'files';
+  chatroom_names?: string[];
+}
+
+interface SyncResult {
+  project_id?: number;
+  project_name?: string;
+  start_date: string;
+  end_date: string;
+  sync_type: string;
+  total_chatrooms: number;
+  success_count: number;
+  failed_count: number;
+  total_messages: number;
+  total_files: number;
+  details: Array<{
+    chatroom_name: string;
+    message_count?: number;
+    status: string;
+    error?: string;
+    first_message_time?: string;
+    last_message_time?: string;
+  }>;
+  timestamp: string;
+}
+
+interface SyncResponse {
+  results: SyncResult;
+  log: string[];
+}
+
 // 通用API请求函数
 async function apiRequest<T>(
   endpoint: string,
@@ -113,7 +162,7 @@ async function apiRequest<T>(
 ): Promise<ApiResponse<T>> {
   try {
     // 保证所有endpoint以/结尾，防止Flask 308重定向
-    let fixedEndpoint = endpoint;
+    const fixedEndpoint = endpoint;
     const url = `${API_BASE_URL}${fixedEndpoint}`;
     const response = await fetch(url, {
       redirect: 'follow',
@@ -249,13 +298,39 @@ export const dashboardAPI = {
   getRecentActivity: () => apiRequest<RecentActivity[]>('/api/v1/dashboard/recent-activities'),
 };
 
+// 同步管理API
+export const syncAPI = {
+  // 获取同步状态
+  getStatus: () => apiRequest<SyncStatus>('/api/v1/sync/status'),
+
+  // 获取群聊列表
+  getChatrooms: () => apiRequest<Chatroom[]>('/api/v1/sync/chatrooms'),
+
+  // 测试 chatlog 连接
+  testConnection: () => apiRequest('/api/v1/sync/test'),
+
+  // 同步指定项目数据
+  syncProject: (projectId: number, syncRequest: SyncRequest) =>
+    apiRequest<SyncResponse>(`/api/v1/sync/project/${projectId}`, {
+      method: 'POST',
+      body: JSON.stringify(syncRequest),
+    }),
+
+  // 通用数据同步
+  syncData: (syncRequest: SyncRequest) =>
+    apiRequest<SyncResponse>('/api/v1/sync/', {
+      method: 'POST',
+      body: JSON.stringify(syncRequest),
+    }),
+};
+
 // 聊天记录API
 export const chatlogAPI = {
   // 获取聊天记录状态
   getStatus: () => apiRequest('/api/v1/chatlog/status'),
 
   // 获取聊天室列表
-  getChatrooms: () => apiRequest('/api/v1/chatlog/chatrooms'),
+  getChatrooms: () => apiRequest('/api/v1/chatroom'),
 
   // 获取联系人列表
   getContacts: () => apiRequest('/api/v1/chatlog/contacts'),
