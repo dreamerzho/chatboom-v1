@@ -23,18 +23,21 @@ def get_projects():
     try:
         projects = Project.query.all()
         project_list = []
-        
         for project in projects:
-            # 获取项目关联的群聊列表，并转为字典格式，便于前端直接渲染
-            chatrooms = []
-            for chatroom in project.chatrooms:
-                chatrooms.append({
-                    'id': chatroom.id,
-                    'chatroom_id': chatroom.chatroom_id,
-                    'chatroom_name': chatroom.chatroom_name,
-                    'chatroom_type': chatroom.chatroom_type,
-                    'created_at': chatroom.created_at.isoformat() if chatroom.created_at else None
-                })
+            # 获取项目关联的群聊列表
+            chatrooms = list(project.chatrooms)
+            # 分组
+            internal_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '内部群聊']
+            external_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '外部群聊']
+            chatrooms_dict = [
+                {
+                    'id': c.id,
+                    'chatroom_id': c.chatroom_id,
+                    'chatroom_name': c.chatroom_name,
+                    'chatroom_type': c.chatroom_type,
+                    'created_at': c.created_at.isoformat() if c.created_at else None
+                } for c in chatrooms
+            ]
             project_list.append({
                 'id': project.id,
                 'project_name': project.project_name,
@@ -44,9 +47,10 @@ def get_projects():
                 'end_date': project.end_date.isoformat() if project.end_date else None,
                 'created_at': project.created_at.isoformat() if project.created_at else None,
                 'updated_at': project.updated_at.isoformat() if project.updated_at else None,
-                'chatrooms': chatrooms  # 新增：群聊信息
+                'chatrooms': chatrooms_dict,
+                'internal_chat_groups': internal_chat_groups,
+                'external_chat_groups': external_chat_groups
             })
-        
         return jsonify({
             'success': True,
             'data': project_list
@@ -143,19 +147,17 @@ def get_project(project_id):
         project = Project.query.get(project_id)
         if not project:
             return jsonify({'success': False, 'error': '项目不存在'}), 404
-        
-        # 获取项目关联的群聊
         chatrooms = ProjectChatroom.query.filter_by(project_id=project_id).all()
-        chatroom_list = []
-        
-        for chatroom in chatrooms:
-            chatroom_list.append({
-                'id': chatroom.id,
-                'chatroom_name': chatroom.chatroom_name,
-                'chatroom_type': chatroom.chatroom_type,
-                'created_at': chatroom.created_at.isoformat() if chatroom.created_at else None
-            })
-        
+        internal_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '内部群聊']
+        external_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '外部群聊']
+        chatroom_list = [
+            {
+                'id': c.id,
+                'chatroom_name': c.chatroom_name,
+                'chatroom_type': c.chatroom_type,
+                'created_at': c.created_at.isoformat() if c.created_at else None
+            } for c in chatrooms
+        ]
         return jsonify({
             'success': True,
             'data': {
@@ -167,7 +169,9 @@ def get_project(project_id):
                 'end_date': project.end_date.isoformat() if project.end_date else None,
                 'created_at': project.created_at.isoformat() if project.created_at else None,
                 'updated_at': project.updated_at.isoformat() if project.updated_at else None,
-                'chatrooms': chatroom_list
+                'chatrooms': chatroom_list,
+                'internal_chat_groups': internal_chat_groups,
+                'external_chat_groups': external_chat_groups
             }
         })
     except Exception as e:
