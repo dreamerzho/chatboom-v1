@@ -318,6 +318,68 @@ function ProjectsPage() {
     checkSyncStatus();
   };
 
+  // 预设时间段选项
+  const getPresetDateRanges = () => {
+    const now = dayjs();
+    const startOfMonth = now.startOf('month');
+    const startOfQuarter = now.startOf('quarter' as any);
+    
+    return [
+      {
+        label: '最近7天',
+        value: 'last7days',
+        range: [now.subtract(7, 'day'), now]
+      },
+      {
+        label: '最近30天',
+        value: 'last30days',
+        range: [now.subtract(30, 'day'), now]
+      },
+      {
+        label: '本月',
+        value: 'thisMonth',
+        range: [startOfMonth, now]
+      },
+      {
+        label: '上月',
+        value: 'lastMonth',
+        range: [startOfMonth.subtract(1, 'month'), startOfMonth.subtract(1, 'day')]
+      },
+      {
+        label: '本季度',
+        value: 'thisQuarter',
+        range: [startOfQuarter, now]
+      },
+      {
+        label: '上个季度',
+        value: 'lastQuarter',
+        range: [startOfQuarter.subtract(3, 'month'), startOfQuarter.subtract(1, 'day')]
+      },
+      {
+        label: '最近半年',
+        value: 'last6months',
+        range: [now.subtract(6, 'month'), now]
+      },
+      {
+        label: '最近一年',
+        value: 'lastYear',
+        range: [now.subtract(1, 'year'), now]
+      }
+    ];
+  };
+
+  // 处理预设时间段选择
+  const handlePresetDateChange = (presetValue: string) => {
+    const presets = getPresetDateRanges();
+    const selectedPreset = presets.find(preset => preset.value === presetValue);
+    
+    if (selectedPreset) {
+      syncForm.setFieldsValue({
+        date_range: selectedPreset.range
+      });
+    }
+  };
+
   // 检查同步状态
   const checkSyncStatus = async () => {
     try {
@@ -701,6 +763,24 @@ function ProjectsPage() {
               chatroom_names: []
             }}
           >
+            {/* 预设时间段选择 */}
+            <Form.Item
+              label="快速选择时间段"
+            >
+              <Select
+                placeholder="选择预设时间段或自定义"
+                onChange={handlePresetDateChange}
+                allowClear
+                style={{ marginBottom: 8 }}
+              >
+                {getPresetDateRanges().map(preset => (
+                  <Option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+
             <Form.Item
               name="date_range"
               label="时间范围"
@@ -710,6 +790,8 @@ function ProjectsPage() {
                 style={{ width: '100%' }}
                 format="YYYY-MM-DD"
                 placeholder={['开始日期', '结束日期']}
+                showTime={false}
+                allowClear={true}
               />
             </Form.Item>
 
@@ -736,6 +818,7 @@ function ProjectsPage() {
                 filterOption={(input, option) =>
                   (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                 }
+                allowClear
               />
             </Form.Item>
           </Form>
