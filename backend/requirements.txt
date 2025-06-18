@@ -1,0 +1,37 @@
+# 广告公司服务监测软件 - 后端依赖包
+# 这个文件列出了项目所需的所有Python包及其版本
+
+# Web框架
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-SQLAlchemy==3.0.5
+
+# 数据库
+psycopg2-binary==2.9.7
+
+# 数据处理
+pandas==2.1.1
+numpy==1.24.3
+
+# HTTP请求库（用于chatlog集成）
+requests==2.31.0
+
+# 日期时间处理
+python-dateutil==2.8.2
+
+# 日志处理
+colorlog==6.7.0
+
+# 开发工具
+python-dotenv==1.0.0
+
+# API文档（可选）
+flask-swagger-ui==4.11.1
+
+# 测试工具（开发环境）
+pytest==7.4.2
+pytest-flask==1.2.0
+
+# 代码质量检查（开发环境）
+flake8==6.1.0
+black==23.9.1 

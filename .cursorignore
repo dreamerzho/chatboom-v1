@@ -1,0 +1,37 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+# --- 自动生成的或你之前添加的规则 ---
+# 排除 backend/backfiles 目录下的所有文件
+basefiles/
+
+# 排除常见的数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 排除常见的数据库备份文件 (如果它们是大型导出文件)
+*.bak
+# 如果你有很多大型的SQL导出文件，且不希望AI索引，可以添加
+# *.sql
+
+# --- 根据最新文件列表建议添加的规则 ---
+
+# 排除 Python 虚拟环境目录
+.venv/
+
+# 排除 VS Code 工作区配置目录
+.vscode/
+
+# 明确排除 Git 仓库的元数据目录
+.git/
+
+# 排除特定的需求文档和报告
+# 只有当你确认这些文档内容对AI理解你的代码没有帮助，且文件较大时才排除
+#广告公司服务监测软件 - 产品需求文档 (v2).md
+
+问题分析报告.md
+#新版开发需求表.html
+
+# 如果你希望排除所有 Markdown 和 TXT 文件，但保留 README.md
+# *.md
+*.txt
+README.md # 重新包含 README.md

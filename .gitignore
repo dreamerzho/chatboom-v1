@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+*.env
+*.venv
+venv/
+ENV/
+env/
+init_employees_pg.py
+
+# VSCode
+.vscode/
+.history/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+
+# Next.js
+.next/
+out/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 前端构建产物
+frontend/.next/
+frontend/node_modules/
+frontend/package-lock.json
+
+# 后端虚拟环境
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+
+# 其他
+*.tar.gz
+*.zip
+*.bak
