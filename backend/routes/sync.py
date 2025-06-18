@@ -11,6 +11,7 @@ from typing import Dict, List, Any
 from models.project import Project
 from models.chat import ChatMessage
 from models.file import FileRecord
+from models.employee import Employee
 from chatlog_integration import chatlog_client
 from db import db
 
@@ -58,7 +59,7 @@ def get_chatrooms():
 @sync_bp.route('/project/<int:project_id>', methods=['POST'])
 def sync_project_data(project_id: int):
     """
-    同步指定项目的聊天记录和文件数据
+    同步指定项目的聊天记录和文件数据（增强版）
     
     参数:
         project_id: 项目ID
@@ -67,6 +68,7 @@ def sync_project_data(project_id: int):
         - end_date: 同步结束日期（必填，格式：YYYY-MM-DD）
         - sync_type: 同步类型，可选 all/chat/files，默认 all
         - chatroom_names: 指定群聊名称列表（可选，不指定则同步项目所有群聊）
+        - force_resync: 是否强制重新同步（可选，默认false）
     
     返回:
         同步进度、日志和结果统计
@@ -78,6 +80,7 @@ def sync_project_data(project_id: int):
         end_date = data.get('end_date')
         sync_type = data.get('sync_type', 'all')
         chatroom_names = data.get('chatroom_names', [])
+        force_resync = data.get('force_resync', False)
         
         # 参数校验
         if not start_date or not end_date:
@@ -127,6 +130,22 @@ def sync_project_data(project_id: int):
                 'error': '项目未配置群聊，请先配置群聊信息'
             }), 400
         
+        # 获取员工列表（用于人员匹配）
+        employees = []
+        try:
+            employee_list = Employee.query.all()
+            for emp in employee_list:
+                employees.append({
+                    'id': emp.id,
+                    'real_name': emp.real_name,
+                    'wechat_nickname': emp.wechat_nickname,
+                    'name_abbreviation': emp.name_abbreviation,
+                    'position': emp.position
+                })
+            logger.info(f"获取到 {len(employees)} 个员工信息用于匹配")
+        except Exception as e:
+            logger.warning(f"获取员工信息失败: {str(e)}，将跳过人员匹配")
+        
         # 开始同步
         sync_log = []
         sync_results = {
@@ -135,30 +154,42 @@ def sync_project_data(project_id: int):
             'start_date': start_date,
             'end_date': end_date,
             'sync_type': sync_type,
+            'force_resync': force_resync,
             'total_chatrooms': len(target_chatrooms),
             'success_count': 0,
             'failed_count': 0,
             'total_messages': 0,
+            'processed_messages': 0,
+            'duplicate_messages': 0,
+            'file_messages': 0,
+            'text_messages': 0,
+            'matched_employees': 0,
+            'unmatched_employees': 0,
             'total_files': 0,
             'details': [],
+            'employee_stats': {},
             'timestamp': datetime.now().isoformat()
         }
         
         sync_log.append(f"开始同步项目：{project.project_name}")
         sync_log.append(f"时间范围：{start_date} ~ {end_date}")
         sync_log.append(f"同步类型：{sync_type}")
+        sync_log.append(f"强制重新同步：{force_resync}")
         sync_log.append(f"目标群聊数量：{len(target_chatrooms)}")
+        sync_log.append(f"员工匹配数量：{len(employees)}")
         
         # 同步聊天记录
         if sync_type in ('all', 'chat'):
             sync_log.append("开始同步聊天记录...")
             
-            # 调用 chatlog 集成进行同步
+            # 调用 chatlog 集成进行同步（增强版）
             chatlog_results = chatlog_client.sync_project_chatlogs(
                 project_name=project.project_name,
                 chatroom_names=target_chatrooms,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                employees=employees,
+                force_resync=force_resync
             )
             
             # 处理聊天记录同步结果
@@ -166,16 +197,89 @@ def sync_project_data(project_id: int):
                 sync_log.append(f"聊天记录同步失败：{chatlog_results.get('message')}")
                 sync_results['failed_count'] = len(target_chatrooms)
             else:
+                # 更新统计信息
                 sync_results['success_count'] = chatlog_results.get('success_count', 0)
                 sync_results['failed_count'] = chatlog_results.get('failed_count', 0)
                 sync_results['total_messages'] = chatlog_results.get('total_messages', 0)
+                sync_results['processed_messages'] = chatlog_results.get('processed_messages', 0)
+                sync_results['duplicate_messages'] = chatlog_results.get('duplicate_messages', 0)
+                sync_results['file_messages'] = chatlog_results.get('file_messages', 0)
+                sync_results['text_messages'] = chatlog_results.get('text_messages', 0)
+                sync_results['matched_employees'] = chatlog_results.get('matched_employees', 0)
+                sync_results['unmatched_employees'] = chatlog_results.get('unmatched_employees', 0)
+                sync_results['employee_stats'] = chatlog_results.get('employee_stats', {})
                 sync_results['details'].extend(chatlog_results.get('details', []))
                 
                 sync_log.append(f"聊天记录同步完成：成功 {sync_results['success_count']} 个群聊，失败 {sync_results['failed_count']} 个群聊")
-                sync_log.append(f"总计获取 {sync_results['total_messages']} 条消息")
+                sync_log.append(f"总计获取 {sync_results['total_messages']} 条消息，处理 {sync_results['processed_messages']} 条，去重 {sync_results['duplicate_messages']} 条")
+                sync_log.append(f"文件消息 {sync_results['file_messages']} 个，文本消息 {sync_results['text_messages']} 个")
+                sync_log.append(f"人员匹配成功 {sync_results['matched_employees']} 个，未匹配 {sync_results['unmatched_employees']} 个")
                 
-                # 这里可以添加将聊天记录保存到数据库的逻辑
-                # TODO: 实现聊天记录数据持久化
+                # 保存聊天记录到数据库
+                try:
+                    chat_messages = chatlog_results.get('chat_messages', [])
+                    if chat_messages:
+                        for msg_data in chat_messages:
+                            # 检查是否已存在（基于seq去重）
+                            existing_msg = ChatMessage.query.filter_by(seq=msg_data['seq']).first()
+                            if not existing_msg:
+                                chat_msg = ChatMessage(
+                                    seq=msg_data['seq'],
+                                    time=msg_data['time'],
+                                    talker=msg_data['talker'],
+                                    talker_name=msg_data['talker_name'],
+                                    sender=msg_data['sender'],
+                                    sender_name=msg_data['sender_name'],
+                                    is_self=msg_data['is_self'],
+                                    type=msg_data['type'],
+                                    sub_type=msg_data['sub_type'],
+                                    content=msg_data['content'],
+                                    employee_id=msg_data.get('employee_id')
+                                )
+                                db.session.add(chat_msg)
+                        
+                        db.session.commit()
+                        sync_log.append(f"成功保存 {len(chat_messages)} 条聊天记录到数据库")
+                    else:
+                        sync_log.append("无聊天记录需要保存")
+                except Exception as e:
+                    logger.error(f"保存聊天记录失败: {str(e)}")
+                    sync_log.append(f"保存聊天记录失败: {str(e)}")
+                
+                # 保存文件记录到数据库
+                try:
+                    file_records = chatlog_results.get('file_records', [])
+                    if file_records:
+                        for file_data in file_records:
+                            # 检查是否已存在（基于文件名和上传时间）
+                            existing_file = FileRecord.query.filter_by(
+                                original_name=file_data['original_name'],
+                                upload_time=file_data['upload_time']
+                            ).first()
+                            if not existing_file:
+                                file_record = FileRecord(
+                                    original_name=file_data['original_name'],
+                                    standardized_name=file_data['standardized_name'],
+                                    project_name=file_data['project_name'],
+                                    work_order=file_data['work_order'],
+                                    workload=file_data['workload'],
+                                    author_abbreviation=file_data['author_abbreviation'],
+                                    version=file_data['version'],
+                                    file_extension=file_data['file_extension'],
+                                    upload_time=file_data['upload_time'],
+                                    uploader=file_data['uploader'],
+                                    file_size=file_data['file_size'],
+                                    status=file_data['status']
+                                )
+                                db.session.add(file_record)
+                        
+                        db.session.commit()
+                        sync_log.append(f"成功保存 {len(file_records)} 个文件记录到数据库")
+                    else:
+                        sync_log.append("无文件记录需要保存")
+                except Exception as e:
+                    logger.error(f"保存文件记录失败: {str(e)}")
+                    sync_log.append(f"保存文件记录失败: {str(e)}")
         
         # 同步文件数据
         if sync_type in ('all', 'files'):
