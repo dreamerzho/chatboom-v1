@@ -21,10 +21,6 @@ def get_dashboard_overview():
     返回: 总览统计数据
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import ChatMessage, FileRecord, EmployeeMapping, Project
-        
         # 获取查询参数
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
@@ -136,10 +132,6 @@ def get_dashboard_trends():
     返回: 趋势统计数据
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import ChatMessage, FileRecord
-        
         # 获取查询参数
         days = request.args.get('days', 30, type=int)
         
@@ -212,10 +204,6 @@ def get_top_performers():
     返回: 员工表现排名
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import ChatMessage, FileRecord, EmployeeMapping
-        
         # 获取查询参数
         limit = request.args.get('limit', 10, type=int)
         period = request.args.get('period', 'week')
@@ -300,10 +288,6 @@ def get_project_summary():
     返回: 项目汇总统计
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import Project, ProjectChatroom, ChatMessage, FileRecord
-        
         # 获取所有项目
         projects = Project.query.all()
         project_summary = []

@@ -21,10 +21,6 @@ def get_files():
     返回: 文件数据列表
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import FileRecord
-        
         # 获取查询参数
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -97,10 +93,6 @@ def get_files_stats():
     返回: 文件统计数据
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import FileRecord
-        
         # 获取查询参数
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
@@ -234,10 +226,6 @@ def get_file_detail(file_id):
     返回: 文件详细信息
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import FileRecord
-        
         file_record = FileRecord.query.get(file_id)
         if not file_record:
             return jsonify({'success': False, 'error': '文件不存在'}), 404
@@ -273,17 +261,13 @@ def update_file(file_id):
     返回: 更新结果
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import FileRecord
+        file_record = FileRecord.query.get(file_id)
+        if not file_record:
+            return jsonify({'success': False, 'error': '文件不存在'}), 404
         
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': '缺少请求数据'}), 400
-        
-        file_record = FileRecord.query.get(file_id)
-        if not file_record:
-            return jsonify({'success': False, 'error': '文件不存在'}), 404
         
         # 更新字段
         if 'project_name' in data:
@@ -332,10 +316,6 @@ def delete_file(file_id):
     返回: 删除结果
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
-        from models import FileRecord
-        
         file_record = FileRecord.query.get(file_id)
         if not file_record:
             return jsonify({'success': False, 'error': '文件不存在'}), 404

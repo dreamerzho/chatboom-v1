@@ -18,13 +18,23 @@ logger = logging.getLogger(__name__)
 def get_projects():
     """
     获取所有项目列表
-    返回: 项目数据列表
+    返回: 项目数据列表，每个项目包含群聊信息
     """
     try:
         projects = Project.query.all()
         project_list = []
         
         for project in projects:
+            # 获取项目关联的群聊列表，并转为字典格式，便于前端直接渲染
+            chatrooms = []
+            for chatroom in project.chatrooms:
+                chatrooms.append({
+                    'id': chatroom.id,
+                    'chatroom_id': chatroom.chatroom_id,
+                    'chatroom_name': chatroom.chatroom_name,
+                    'chatroom_type': chatroom.chatroom_type,
+                    'created_at': chatroom.created_at.isoformat() if chatroom.created_at else None
+                })
             project_list.append({
                 'id': project.id,
                 'project_name': project.project_name,
@@ -33,7 +43,8 @@ def get_projects():
                 'start_date': project.start_date.isoformat() if project.start_date else None,
                 'end_date': project.end_date.isoformat() if project.end_date else None,
                 'created_at': project.created_at.isoformat() if project.created_at else None,
-                'updated_at': project.updated_at.isoformat() if project.updated_at else None
+                'updated_at': project.updated_at.isoformat() if project.updated_at else None,
+                'chatrooms': chatrooms  # 新增：群聊信息
             })
         
         return jsonify({
@@ -53,6 +64,7 @@ def create_project():
     """
     try:
         data = request.get_json()
+        logger.info(f"[create_project] 收到数据: {data}")
         if not data:
             return jsonify({'success': False, 'error': '缺少请求数据'}), 400
         
@@ -76,6 +88,31 @@ def create_project():
         )
         
         db.session.add(new_project)
+        db.session.commit()
+        
+        # 新增：自动同步群聊
+        internal_groups = data.get('internal_chat_groups', [])
+        external_groups = data.get('external_chat_groups', [])
+        logger.info(f"[create_project] internal_chat_groups: {internal_groups} 类型: {type(internal_groups)}")
+        logger.info(f"[create_project] external_chat_groups: {external_groups} 类型: {type(external_groups)}")
+        for name in internal_groups:
+            chatroom = ProjectChatroom(
+                project_id=new_project.id,
+                chatroom_id=name,
+                chatroom_name=name,
+                chatroom_type='内部群聊',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(chatroom)
+        for name in external_groups:
+            chatroom = ProjectChatroom(
+                project_id=new_project.id,
+                chatroom_id=name,
+                chatroom_name=name,
+                chatroom_type='外部群聊',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(chatroom)
         db.session.commit()
         
         return jsonify({
@@ -147,6 +184,7 @@ def update_project(project_id):
     """
     try:
         data = request.get_json()
+        logger.info(f"[update_project] 收到数据: {data}")
         if not data:
             return jsonify({'success': False, 'error': '缺少请求数据'}), 400
         
@@ -168,6 +206,34 @@ def update_project(project_id):
         
         project.updated_at = datetime.utcnow()
         
+        db.session.commit()
+        
+        # 新增：自动同步群聊
+        internal_groups = data.get('internal_chat_groups', [])
+        external_groups = data.get('external_chat_groups', [])
+        logger.info(f"[update_project] internal_chat_groups: {internal_groups} 类型: {type(internal_groups)}")
+        logger.info(f"[update_project] external_chat_groups: {external_groups} 类型: {type(external_groups)}")
+        # 先清空原有群聊
+        ProjectChatroom.query.filter_by(project_id=project_id).delete()
+        db.session.commit()
+        for name in internal_groups:
+            chatroom = ProjectChatroom(
+                project_id=project_id,
+                chatroom_id=name,
+                chatroom_name=name,
+                chatroom_type='内部群聊',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(chatroom)
+        for name in external_groups:
+            chatroom = ProjectChatroom(
+                project_id=project_id,
+                chatroom_id=name,
+                chatroom_name=name,
+                chatroom_type='外部群聊',
+                created_at=datetime.utcnow()
+            )
+            db.session.add(chatroom)
         db.session.commit()
         
         return jsonify({
@@ -196,8 +262,6 @@ def delete_project(project_id):
     返回: 删除结果
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
         project = Project.query.get(project_id)
         if not project:
             return jsonify({'success': False, 'error': '项目不存在'}), 404
@@ -222,8 +286,6 @@ def add_project_chatroom(project_id):
     返回: 添加结果
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': '缺少请求数据'}), 400
@@ -270,8 +332,10 @@ def add_project_chatroom(project_id):
             'message': '群聊添加成功'
         })
     except Exception as e:
-        logger.error(f"添加项目群聊失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        import traceback
+        logger.exception(f"添加项目群聊失败: {str(e)}")  # 打印详细堆栈
+        tb = traceback.format_exc()
+        return jsonify({'success': False, 'error': str(e), 'traceback': tb}), 500
 
 @projects_bp.route('/<int:project_id>/stats', methods=['GET'])
 def get_project_stats(project_id):
@@ -282,8 +346,6 @@ def get_project_stats(project_id):
     返回: 项目统计数据
     """
     try:
-        # 使用current_app获取db实例
-        db = current_app.extensions['sqlalchemy'].db
         project = Project.query.get(project_id)
         if not project:
             return jsonify({'success': False, 'error': '项目不存在'}), 404
