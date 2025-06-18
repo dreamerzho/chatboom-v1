@@ -11,7 +11,7 @@ from typing import Dict, List, Any
 from models.project import Project
 from models.chat import ChatMessage
 from models.file import FileRecord
-from models.employee import Employee
+from models.employee import EmployeeMapping
 from chatlog_integration import chatlog_client
 from db import db
 
@@ -133,7 +133,7 @@ def sync_project_data(project_id: int):
         # 获取员工列表（用于人员匹配）
         employees = []
         try:
-            employee_list = Employee.query.all()
+            employee_list = EmployeeMapping.query.all()
             for emp in employee_list:
                 employees.append({
                     'id': emp.id,

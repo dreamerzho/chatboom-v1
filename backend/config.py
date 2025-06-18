@@ -9,19 +9,17 @@ class Config:
     Flask项目的全局配置类。
     支持通过环境变量覆盖默认值，便于Docker和云端部署。
     """
-    # 数据库类型: 'sqlite' 或 'postgresql'
-    DB_TYPE = os.getenv('DB_TYPE', 'sqlite')
-    if DB_TYPE == 'postgresql':
-        POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'chattest-db-postgresql.ns-3fzuj6vq.svc')
-        POSTGRES_PORT = int(os.getenv('POSTGRES_PORT', 5432))
-        POSTGRES_USER = os.getenv('POSTGRES_USER', 'postgres')
-        POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'mmxwsgg6')
-        POSTGRES_DB = os.getenv('POSTGRES_DB', 'postgres')
-        SQLALCHEMY_DATABASE_URI = (
-            f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-        )
-    else:
-        SQLALCHEMY_DATABASE_URI = 'sqlite:///ad_company_monitor.db'
+    # 数据库配置 - 统一使用PostgreSQL
+    POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'chattest-db-postgresql.ns-3fzuj6vq.svc')
+    POSTGRES_PORT = int(os.getenv('POSTGRES_PORT', 5432))
+    POSTGRES_USER = os.getenv('POSTGRES_USER', 'postgres')
+    POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'mmxwsgg6')
+    POSTGRES_DB = os.getenv('POSTGRES_DB', 'postgres')
+    
+    # SQLAlchemy数据库URI - 统一使用PostgreSQL
+    SQLALCHEMY_DATABASE_URI = (
+        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # chatlog工具的API地址

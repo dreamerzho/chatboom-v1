@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from urllib.parse import quote
-from chat_parser import ChatlogProcessor
+from chatlog_processor import ChatlogProcessor
 
 # 配置日志
 logger = logging.getLogger(__name__)
