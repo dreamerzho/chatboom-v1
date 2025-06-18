@@ -116,10 +116,10 @@ def sync_project_data(project_id: int):
         else:
             # 使用项目配置的群聊
             target_chatrooms = []
-            if project.internal_chat_groups:
-                target_chatrooms.extend(project.internal_chat_groups)
-            if project.external_chat_groups:
-                target_chatrooms.extend(project.external_chat_groups)
+            # 从 ProjectChatroom 关联表获取群聊信息
+            project_chatrooms = project.chatrooms.all()
+            for chatroom in project_chatrooms:
+                target_chatrooms.append(chatroom.chatroom_name)
         
         if not target_chatrooms:
             return jsonify({
@@ -183,7 +183,7 @@ def sync_project_data(project_id: int):
             
             # 统计指定时间段内的文件数量
             file_count = FileRecord.query.filter(
-                FileRecord.project_id == project_id,
+                FileRecord.project_name == project.project_name,
                 FileRecord.created_at >= start_dt,
                 FileRecord.created_at <= end_dt
             ).count()
