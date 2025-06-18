@@ -68,6 +68,7 @@ def get_files():
                 'status': file_record.status
             })
         
+        files_list = files_list if isinstance(files_list, list) else []
         return jsonify({
             'success': True,
             'data': {
