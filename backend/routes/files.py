@@ -329,4 +329,14 @@ def delete_file(file_id):
         })
     except Exception as e:
         logger.error(f"删除文件记录失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500 
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# 兼容 RESTful 风格，增加 /api/v1/files/ GET 路由，行为与 /list 一致
+@files_bp.route('/', methods=['GET'])
+def get_files_root():
+    """
+    获取文件列表（RESTful风格，等价于 /api/v1/files/list）
+    查询参数: page, per_page, project_name, author_abbreviation, status (可选)
+    返回: 文件数据列表
+    """
+    return get_files() 
