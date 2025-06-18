@@ -44,42 +44,54 @@ class ChatlogIntegration:
     
     def check_service_status(self) -> Dict[str, Any]:
         """
-        检查 chatlog 服务是否正常运行
-        
+        检查 chatlog 服务是否正常运行，只允许JSON格式
         返回:
             包含服务状态信息的字典
         """
         try:
-            # 尝试访问群聊列表接口来检查服务状态
-            response = self.session.get(f"{self.api_base}/api/v1/chatroom")
+            # 添加 format=json 参数确保返回 JSON 格式
+            params = {"format": "json"}
+            response = self.session.get(f"{self.api_base}/api/v1/chatroom", params=params)
+            logger.info(f"检查服务状态: {self.api_base}/api/v1/chatroom，参数: {params}，状态码: {response.status_code}")
             if response.status_code == 200:
-                return {
-                    "status": "running",
-                    "message": "chatlog 服务正常运行",
-                    "timestamp": datetime.now().isoformat(),
-                    "api_base": self.api_base
-                }
+                if not response.text.strip():
+                    return {
+                        "status": "warning",
+                        "message": "chatlog 服务响应为空，可能服务未完全启动",
+                        "timestamp": datetime.now().isoformat(),
+                        "api_base": self.api_base
+                    }
+                content_type = response.headers.get('Content-Type', '')
+                logger.info(f"响应Content-Type: {content_type}")
+                if 'application/json' not in content_type:
+                    return {
+                        "status": "error",
+                        "message": f"chatlog 服务返回的不是JSON格式，Content-Type: {content_type}",
+                        "timestamp": datetime.now().isoformat(),
+                        "api_base": self.api_base
+                    }
+                try:
+                    response.json()
+                    return {
+                        "status": "running",
+                        "message": "chatlog 服务正常运行（JSON格式）",
+                        "timestamp": datetime.now().isoformat(),
+                        "api_base": self.api_base
+                    }
+                except Exception as e:
+                    return {
+                        "status": "error",
+                        "message": f"chatlog 服务JSON解析失败: {str(e)}，内容预览: {response.text[:200]}",
+                        "timestamp": datetime.now().isoformat(),
+                        "api_base": self.api_base
+                    }
             else:
                 return {
                     "status": "error",
-                    "message": f"chatlog 服务响应异常，状态码: {response.status_code}",
+                    "message": f"chatlog 服务响应异常，状态码: {response.status_code}，响应: {response.text[:100]}...",
                     "timestamp": datetime.now().isoformat(),
                     "api_base": self.api_base
                 }
-        except requests.exceptions.ConnectionError:
-            return {
-                "status": "error",
-                "message": f"无法连接到 chatlog 服务 {self.api_base}，请确保服务已启动",
-                "timestamp": datetime.now().isoformat(),
-                "api_base": self.api_base
-            }
-        except requests.exceptions.Timeout:
-            return {
-                "status": "error",
-                "message": "连接 chatlog 服务超时",
-                "timestamp": datetime.now().isoformat(),
-                "api_base": self.api_base
-            }
         except Exception as e:
             return {
                 "status": "error",
@@ -91,18 +103,36 @@ class ChatlogIntegration:
     def get_chatrooms(self) -> List[Dict[str, Any]]:
         """
         获取所有微信群聊列表
-        
+        只允许JSON格式，非JSON直接报错
         返回:
             群聊信息列表，每个群聊包含 id、name 等信息
         """
         try:
-            response = self.session.get(f"{self.api_base}/api/v1/chatroom")
+            # 添加 format=json 参数确保返回 JSON 格式
+            params = {"format": "json"}
+            response = self.session.get(f"{self.api_base}/api/v1/chatroom", params=params)
+            logger.info(f"请求群聊列表: {self.api_base}/api/v1/chatroom，参数: {params}，状态码: {response.status_code}")
+            
             if response.status_code == 200:
-                chatrooms = response.json()
-                logger.info(f"成功获取 {len(chatrooms)} 个群聊")
-                return chatrooms
+                # 检查响应内容
+                if not response.text.strip():
+                    logger.error("群聊列表响应为空")
+                    return []
+                
+                content_type = response.headers.get('Content-Type', '')
+                logger.info(f"响应Content-Type: {content_type}")
+                if 'application/json' not in content_type:
+                    logger.error(f"chatlog 群聊列表接口返回的不是JSON格式，Content-Type: {content_type}")
+                    raise ValueError(f"chatlog 群聊列表接口返回的不是JSON格式，Content-Type: {content_type}")
+                try:
+                    chatrooms = response.json()
+                    logger.info(f"成功获取 {len(chatrooms)} 个群聊（JSON格式）")
+                    return chatrooms
+                except Exception as e:
+                    logger.error(f"chatlog 群聊列表接口JSON解析失败: {str(e)}，内容预览: {response.text[:200]}")
+                    raise
             else:
-                logger.error(f"获取群聊列表失败，状态码: {response.status_code}")
+                logger.error(f"获取群聊列表失败，状态码: {response.status_code}，响应: {response.text[:200]}...")
                 return []
         except Exception as e:
             logger.error(f"获取群聊列表时发生错误: {str(e)}")
