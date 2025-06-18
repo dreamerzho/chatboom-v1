@@ -22,13 +22,17 @@ import {
   Spin,
   Alert,
   Tag,
-  Empty
+  Empty,
+  Select,
+  Tooltip,
+  Badge
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, ProjectOutlined, FileOutlined, EyeOutlined, SyncOutlined, BarChartOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, ProjectOutlined, FileOutlined, EyeOutlined, SyncOutlined, BarChartOutlined, ExclamationCircleOutlined, CheckCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { projectAPI, fileAPI } from '../../lib/api';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
+const { Option } = Select;
 
 // 项目数据接口
 interface Project {
@@ -40,6 +44,10 @@ interface Project {
   external_chat_groups?: string[];
   created_at: string;
   updated_at: string;
+  // 新增字段：健康状态和负面关键词统计
+  health_status?: 'good' | 'warning' | 'danger';
+  negative_keywords_count?: number;
+  total_files?: number;
 }
 
 // 项目表单数据接口
@@ -50,6 +58,44 @@ interface ProjectFormData {
   external_chat_groups?: string[];
 }
 
+// 计算项目健康状态
+const calculateHealthStatus = (project: Project): 'good' | 'warning' | 'danger' => {
+  // 模拟健康状态计算规则
+  const fileCount = project.total_files || 0;
+  const negativeCount = project.negative_keywords_count || 0;
+  
+  if (fileCount === 0) return 'warning';
+  if (negativeCount > fileCount * 0.1) return 'danger'; // 负面词超过10%
+  if (negativeCount > fileCount * 0.05) return 'warning'; // 负面词超过5%
+  return 'good';
+};
+
+// 获取健康状态图标和颜色
+const getHealthStatusConfig = (status: 'good' | 'warning' | 'danger') => {
+  switch (status) {
+    case 'good':
+      return { icon: <CheckCircleOutlined />, color: '#52c41a', text: '健康' };
+    case 'warning':
+      return { icon: <ClockCircleOutlined />, color: '#faad14', text: '注意' };
+    case 'danger':
+      return { icon: <ExclamationCircleOutlined />, color: '#ff4d4f', text: '异常' };
+  }
+};
+
+// 新增：获取群聊列表API
+const fetchChatGroups = async (): Promise<string[]> => {
+  try {
+    const res = await fetch('/api/chatlog/chatrooms');
+    const data = await res.json();
+    if (data.success && Array.isArray(data.data)) {
+      return data.data.map((item: any) => item.name);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+};
+
 function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +104,7 @@ function ProjectsPage() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [projectStats, setProjectStats] = useState<{[key: string]: number}>({});
   const [form] = Form.useForm();
+  const [chatGroups, setChatGroups] = useState<string[]>([]);
 
   // 获取项目列表
   const fetchProjects = async () => {
@@ -68,9 +115,17 @@ function ProjectsPage() {
       const response = await projectAPI.getProjects();
       
       if (response.success) {
-        setProjects(response.data || []);
+        // 为项目添加模拟的健康状态和负面关键词数据
+        const projectsWithHealth = (response.data || []).map((project: Project) => ({
+          ...project,
+          total_files: Math.floor(Math.random() * 50) + 1, // 模拟文件数
+          negative_keywords_count: Math.floor(Math.random() * 10), // 模拟负面词数
+          health_status: calculateHealthStatus(project)
+        }));
+        
+        setProjects(projectsWithHealth);
         // 获取每个项目的文件统计
-        await fetchProjectStats(response.data || []);
+        await fetchProjectStats(projectsWithHealth);
       } else {
         setError(response.error || '获取项目列表失败');
         message.error('获取项目列表失败');
@@ -134,13 +189,12 @@ function ProjectsPage() {
       await projectAPI.updateProject(editingProject.id, values);
       message.success('项目更新成功');
       fetchProjects();
-      setIsModalVisible(false);
+      setModalVisible(false);
     } catch (error) {
       message.error('项目更新失败');
       console.error('Failed to update project:', error);
     }
   };
-
 
   // 删除项目
   const handleDeleteProject = async (id: number) => {
@@ -165,8 +219,8 @@ function ProjectsPage() {
     form.setFieldsValue({
       project_name: record.project_name,
       description: record.description,
-      internal_chat_groups: record.internal_chat_groups?.join(', ') || '',
-      external_chat_groups: record.external_chat_groups?.join(', ') || ''
+      internal_chat_groups: record.internal_chat_groups || [],
+      external_chat_groups: record.external_chat_groups || []
     });
     setModalVisible(true);
   };
@@ -188,15 +242,10 @@ function ProjectsPage() {
   // 提交表单
   const handleSubmit = () => {
     form.validateFields().then(values => {
-      // Process chat group strings into arrays
       const processedValues: ProjectFormData = {
         ...values,
-        internal_chat_groups: values.internal_chat_groups
-          ? values.internal_chat_groups.split(',').map((s: string) => s.trim()).filter((s: string) => s)
-          : undefined,
-        external_chat_groups: values.external_chat_groups
-          ? values.external_chat_groups.split(',').map((s: string) => s.trim()).filter((s: string) => s)
-          : undefined,
+        internal_chat_groups: values.internal_chat_groups || [],
+        external_chat_groups: values.external_chat_groups || []
       };
 
       if (editingProject) {
@@ -206,6 +255,42 @@ function ProjectsPage() {
       }
     });
   };
+
+  // 同步数据
+  const handleSyncData = (project: Project) => {
+    Modal.info({
+      title: '同步数据',
+      content: (
+        <div>
+          <p>项目：{project.project_name}</p>
+          <p>功能开发中，将支持：</p>
+          <ul>
+            <li>选择时间范围自动同步聊天记录</li>
+            <li>上传聊天记录文件</li>
+            <li>实时数据更新</li>
+          </ul>
+        </div>
+      ),
+      okText: '知道了'
+    });
+  };
+
+  // 查看项目详情
+  const handleViewDetails = (project: Project) => {
+    message.info(`查看项目详情：${project.project_name}（功能开发中）`);
+    // TODO: 跳转到项目详情页 /projects/[id]
+  };
+
+  // 生成报告
+  const handleGenerateReport = (project: Project) => {
+    message.info(`生成项目报告：${project.project_name}（功能开发中）`);
+    // TODO: 生成项目报告功能
+  };
+
+  // 加载群聊列表
+  useEffect(() => {
+    fetchChatGroups().then(setChatGroups);
+  }, []);
 
   // 组件加载时获取数据
   useEffect(() => {
@@ -298,10 +383,10 @@ function ProjectsPage() {
         <Col span={6}>
           <Card>
             <Statistic
-              title="平均文件数"
-              value={projects.length > 0 ? Math.round(Object.values(projectStats).reduce((sum, count) => sum + count, 0) / projects.length) : 0}
-              prefix={<FileOutlined />}
-              valueStyle={{ color: '#faad14' }}
+              title="健康项目"
+              value={projects.filter(p => p.health_status === 'good').length}
+              prefix={<CheckCircleOutlined />}
+              valueStyle={{ color: '#52c41a' }}
             />
           </Card>
         </Col>
@@ -309,91 +394,130 @@ function ProjectsPage() {
 
       {/* 项目列表 */}
       {projects.length > 0 ? (
-      <List
+        <List
           grid={{ gutter: 16, xs: 1, sm: 2, md: 2, lg: 3, xl: 4, xxl: 4 }}
-        dataSource={projects}
-          renderItem={(project) => (
-          <List.Item>
-              <Card
-                hoverable
-                actions={[
-                  <Button 
-                    type="text" 
-                    icon={<BarChartOutlined />} 
-                    onClick={() => message.info('报告功能待实现')}
-                  >
-                    报告
-                  </Button>,
-                  <Button 
-                    type="text" 
-                    icon={<EyeOutlined />} 
-                    onClick={() => message.info('查看详情功能待实现')}
-                  >
-                    查看详情
-                  </Button>,
-                  <Button 
-                    type="text" 
-                    icon={<EditOutlined />} 
-                    onClick={() => handleEdit(project)}
-                  >
-                    编辑
-                  </Button>,
-                  <Button 
-                    type="text" 
-                    icon={<SyncOutlined />} 
-                    onClick={() => message.info('同步数据功能待实现')}
-                  >
-                    同步数据
-                  </Button>,
-                  <Popconfirm
-                    title="确定要删除这个项目吗？"
-                    description="删除后无法恢复，相关文件将失去项目关联。"
-                    onConfirm={() => handleDeleteProject(project.id)}
-                    okText="确定"
-                    cancelText="取消"
-                  >
-                    <Button 
-                      type="text" 
-                      danger 
-                      icon={<DeleteOutlined />} 
+          dataSource={projects}
+          renderItem={(project) => {
+            const healthConfig = getHealthStatusConfig(project.health_status || 'warning');
+            return (
+              <List.Item>
+                <Card
+                  hoverable
+                  actions={[
+                    <Tooltip title="生成报告">
+                      <Button 
+                        type="text" 
+                        icon={<BarChartOutlined />} 
+                        onClick={() => handleGenerateReport(project)}
+                      >
+                        报告
+                      </Button>
+                    </Tooltip>,
+                    <Tooltip title="查看详情">
+                      <Button 
+                        type="text" 
+                        icon={<EyeOutlined />} 
+                        onClick={() => handleViewDetails(project)}
+                      >
+                        详情
+                      </Button>
+                    </Tooltip>,
+                    <Tooltip title="编辑项目">
+                      <Button 
+                        type="text" 
+                        icon={<EditOutlined />} 
+                        onClick={() => handleEdit(project)}
+                      >
+                        编辑
+                      </Button>
+                    </Tooltip>,
+                    <Tooltip title="同步数据">
+                      <Button 
+                        type="text" 
+                        icon={<SyncOutlined />} 
+                        onClick={() => handleSyncData(project)}
+                      >
+                        同步
+                      </Button>
+                    </Tooltip>,
+                    <Popconfirm
+                      title="确定要删除这个项目吗？"
+                      description="删除后无法恢复，相关文件将失去项目关联。"
+                      onConfirm={() => handleDeleteProject(project.id)}
+                      okText="确定"
+                      cancelText="取消"
                     >
-                      删除
-                    </Button>
-                  </Popconfirm>
-                ]}
-              >
-                <Card.Meta
-                  avatar={<ProjectOutlined style={{ fontSize: 24, color: '#1890ff' }} />} 
-                  title={
-                    <Space>
-                      <Text strong>{project.project_name}</Text>
-                      <Tag color={project.status === 'active' ? 'green' : 'orange'}>
-                        {project.status === 'active' ? '活跃' : '暂停'}
-                      </Tag>
-                    </Space>
-                  }
-                  description={
-                    <div>
-                      <Paragraph ellipsis={{ rows: 2 }}>
-                        {project.description || '暂无描述'}
-                      </Paragraph>
-                      <div style={{ marginTop: 8 }}>
-                        <Text type="secondary">
-                          文件数量: {projectStats[project.project_name] || 0}
-                        </Text>
+                      <Tooltip title="删除项目">
+                        <Button 
+                          type="text" 
+                          danger 
+                          icon={<DeleteOutlined />} 
+                        >
+                          删除
+                        </Button>
+                      </Tooltip>
+                    </Popconfirm>
+                  ]}
+                >
+                  <Card.Meta
+                    avatar={
+                      <Badge 
+                        count={healthConfig.icon} 
+                        style={{ backgroundColor: healthConfig.color }}
+                        offset={[-5, 5]}
+                      >
+                        <ProjectOutlined style={{ fontSize: 24, color: '#1890ff' }} />
+                      </Badge>
+                    }
+                    title={
+                      <Space>
+                        <Text strong>{project.project_name}</Text>
+                        <Tag color={project.status === 'active' ? 'green' : 'orange'}>
+                          {project.status === 'active' ? '活跃' : '暂停'}
+                        </Tag>
+                        <Tag color={healthConfig.color}>
+                          {healthConfig.text}
+                        </Tag>
+                      </Space>
+                    }
+                    description={
+                      <div>
+                        <Paragraph ellipsis={{ rows: 2 }}>
+                          {project.description || '暂无描述'}
+                        </Paragraph>
+                        <div style={{ margin: '8px 0' }}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>内部群聊：</Text>
+                          {(project.internal_chat_groups || []).map(name => (
+                            <Tag color="blue" key={name}>{name}</Tag>
+                          ))}
+                          <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>外部群聊：</Text>
+                          {(project.external_chat_groups || []).map(name => (
+                            <Tag color="orange" key={name}>{name}</Tag>
+                          ))}
+                        </div>
+                        <div style={{ marginTop: 8 }}>
+                          <Space size="small">
+                            <Text type="secondary">
+                              文件: {project.total_files || 0}
+                            </Text>
+                            <Text type="secondary">
+                              负面词: {project.negative_keywords_count || 0}
+                            </Text>
+                          </Space>
+                        </div>
+                        <div style={{ marginTop: 4 }}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            创建: {new Date(project.created_at).toLocaleDateString()}
+                          </Text>
+                        </div>
                       </div>
-                      <div style={{ marginTop: 4 }}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          创建时间: {new Date(project.created_at).toLocaleDateString()}
-                        </Text>
-                      </div>
-                    </div>
-                  }
-                />
-            </Card>
-          </List.Item>
-        )}
-      />
+                    }
+                  />
+                </Card>
+              </List.Item>
+            );
+          }}
+        />
       ) : (
         <Empty
           description="暂无项目数据"
@@ -446,18 +570,26 @@ function ProjectsPage() {
             name="internal_chat_groups"
             label="内部群聊"
           >
-            <TextArea
-              rows={2}
-              placeholder="多个群聊请用逗号分隔"
+            <Select
+              mode="tags"
+              placeholder="选择或输入内部群聊名称"
+              style={{ width: '100%' }}
+              options={chatGroups.map(group => ({ label: group, value: group }))}
+              showSearch
+              filterOption={(input, option) => (option?.label as string).toLowerCase().includes(input.toLowerCase())}
             />
           </Form.Item>
           <Form.Item
             name="external_chat_groups"
             label="外部群聊"
           >
-            <TextArea
-              rows={2}
-              placeholder="多个群聊请用逗号分隔"
+            <Select
+              mode="tags"
+              placeholder="选择或输入外部群聊名称"
+              style={{ width: '100%' }}
+              options={chatGroups.map(group => ({ label: group, value: group }))}
+              showSearch
+              filterOption={(input, option) => (option?.label as string).toLowerCase().includes(input.toLowerCase())}
             />
           </Form.Item>
         </Form>
@@ -466,4 +598,4 @@ function ProjectsPage() {
   );
 }
 
-export default ProjectsPage;
+export default ProjectsPage; 
