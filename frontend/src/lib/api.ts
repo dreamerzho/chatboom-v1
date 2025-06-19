@@ -326,9 +326,21 @@ export const syncAPI = {
 
 // 聊天记录API
 export const chatlogAPI = {
-  // 获取聊天记录状态
-  getStatus: () => apiRequest('/api/v1/chatlog/status'),
-
+  // 健康检查：请求后端健康检查接口
+  getStatus: async () => {
+    try {
+      const response = await fetch('/api/v1/sync/chatlog-health');
+      if (!response.ok) throw new Error('网络错误');
+      const data = await response.json();
+      if (data && data.status === "ok") {
+        return { success: true };
+      } else {
+        return { success: false, error: data?.message || 'chatlog服务异常' };
+      }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : '未知错误' };
+    }
+  },
   // 获取聊天室列表
   getChatrooms: () => apiRequest('/api/v1/chatroom'),
 

@@ -40,7 +40,7 @@ import {
   ExclamationCircleOutlined,
   CloseCircleOutlined
 } from '@ant-design/icons';
-import { projectAPI, syncAPI } from '../../lib/api';
+import { projectAPI, syncAPI, chatlogAPI } from '../../lib/api';
 import dayjs from 'dayjs';
 
 const { Title, Text, Paragraph } = Typography;
@@ -383,12 +383,22 @@ function ProjectsPage() {
   // 检查同步状态
   const checkSyncStatus = async () => {
     try {
-      const response = await syncAPI.getStatus();
-      if (response.success && response.data) {
-        setSyncStatus(response.data);
-      }
+      // 先检查Chatlog健康
+      const chatlogRes = await chatlogAPI.getStatus();
+      setSyncStatus({
+        status: chatlogRes.success ? 'running' : 'error',
+        message: chatlogRes.success ? 'Chatlog服务正常' : (chatlogRes.error || 'Chatlog服务异常'),
+        timestamp: new Date().toISOString(),
+        api_base: ''
+      });
     } catch (error) {
-      console.error('检查同步状态失败:', error);
+      setSyncStatus({
+        status: 'error',
+        message: 'Chatlog服务异常',
+        timestamp: new Date().toISOString(),
+        api_base: ''
+      });
+      console.error('检查Chatlog健康失败:', error);
     }
   };
 
