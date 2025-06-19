@@ -5,7 +5,7 @@ from .employee import EmployeeMapping
 from .project import Project, ProjectChatroom
 from .file import FileRecord, FileVersion
 from .chat import ChatMessage
-from .keyword import KeywordCategory
+from .keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKeyword
 
 __all__ = [
     'EmployeeMapping',
@@ -14,5 +14,8 @@ __all__ = [
     'FileRecord',
     'FileVersion',
     'ChatMessage',
-    'KeywordCategory'
+    'KeywordCategory',
+    'Keyword',
+    'KeywordAnalysis',
+    'MessageKeyword'
 ] 
