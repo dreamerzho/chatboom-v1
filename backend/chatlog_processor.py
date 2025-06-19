@@ -280,12 +280,16 @@ class ChatLogProcessor:
         创建聊天消息记录
         """
         return {
-            'message_id': parsed_message.get('seq'),
+            'seq': parsed_message.get('seq'),  # 使用seq字段，与数据库模型保持一致
+            'time': parsed_message.get('time'),
+            'talker': parsed_message.get('talker'),
             'talker_name': parsed_message.get('talker_name'),
+            'sender': parsed_message.get('sender'),
             'sender_name': parsed_message.get('sender_name'),
-            'message_type': parsed_message.get('type'),
+            'is_self': parsed_message.get('is_self', False),
+            'type': parsed_message.get('type'),
+            'sub_type': parsed_message.get('sub_type', 0),
             'content': parsed_message.get('parsed_content', {}).get('text', ''),
-            'timestamp': parsed_message.get('time'),
             'employee_id': employee.get('id') if employee and role == 'employee' else None,
             'sender_role': role
         }
