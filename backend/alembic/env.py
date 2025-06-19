@@ -14,19 +14,26 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
+# 添加模型导入 - 修复循环导入问题
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from app import db
-# 让 Alembic 能自动感知所有模型的结构变化
-# target_metadata 用于自动生成迁移脚本
-# 这里直接引用 Flask-SQLAlchemy 的 db.metadata
-# 这样 alembic revision --autogenerate 就能检测到模型变更
 
+# 添加当前目录到Python路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
+# 导入数据库和所有模型
+from db import db
+
+# 导入所有模型以确保它们被注册到metadata中
+from models.employee import EmployeeMapping
+from models.project import Project, ProjectChatroom
+from models.file import FileRecord, FileVersion
+from models.chat import ChatMessage
+from models.keyword import KeywordCategory
+
+# 设置target_metadata用于自动生成迁移
 target_metadata = db.metadata
 
 # other values from the config, defined by the needs of env.py,

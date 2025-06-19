@@ -6,7 +6,6 @@
 整合了旧chat_parser.py中的核心功能
 """
 
-import xml.etree.ElementTree as ET
 import re
 import logging
 from datetime import datetime
@@ -17,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 class ChatMessageParser:
     """
-    聊天记录解析器
-    负责解析聊天记录中的各种信息，包括文件、文本、图片等
+    聊天记录解析器 - 重构版
+    使用正则表达式替代XML解析，提高健壮性
     """
     
     def __init__(self):
@@ -33,426 +32,396 @@ class ChatMessageParser:
             10000: "系统消息"
         }
         
-        self.file_subtypes = {
-            1: "链接",
-            3: "图片",
-            5: "视频",
-            6: "文件",
-            8: "音乐"
+        # 定义正则表达式，用于从混乱的content中提取文件名
+        # 寻找 <title> 和 </title> 之间的内容
+        self.filename_regex = re.compile(r'<title>(.*?)</title>', re.DOTALL)
+        
+        # 定义文件扩展名正则，用于识别文件类型
+        self.file_extension_regex = re.compile(r'\.([a-zA-Z0-9]+)$')
+        
+        # 定义文件名解析正则，支持多种格式
+        self.filename_parse_regex = re.compile(
+            r'^(\d{6})-([^-]+)-([^-]+)-([^-]+)-([^-]+)-v?(\d+(?:\.\d+)*)\.([a-zA-Z0-9]+)$'
+        )
+
+    def _parse_multimedia_content(self, content: str) -> Dict[str, Any]:
+        """
+        【核心修复】解析多媒体消息内容 (type: 49)
+        使用正则表达式替代XML解析，提高健壮性
+        """
+        parsed_data = {
+            'type': '多媒体',
+            'raw_content': content,
+            'filename': None,
+            'subtype': '未知多媒体',
+            'file_extension': None
         }
-    
+        
+        try:
+            # 尝试使用正则表达式从content中提取文件名
+            match = self.filename_regex.search(content)
+            if match:
+                # 如果匹配成功，提取到的就是文件名
+                filename = match.group(1).strip()
+                parsed_data['filename'] = filename
+                parsed_data['subtype'] = '文件'
+                
+                # 提取文件扩展名
+                ext_match = self.file_extension_regex.search(filename)
+                if ext_match:
+                    parsed_data['file_extension'] = ext_match.group(1).lower()
+                
+                logger.info(f"成功从多媒体消息中解析出文件名: {filename}")
+            else:
+                # 如果正则匹配失败，记录原始内容用于调试
+                logger.warning(f"无法从多媒体消息中解析出文件名。Content预览: {content[:200]}...")
+                
+        except Exception as e:
+            logger.error(f"解析多媒体消息时发生错误: {str(e)}")
+            parsed_data['error'] = str(e)
+
+        return parsed_data
+
     def parse_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
         解析单条聊天记录
-        
-        参数:
-            message: 原始消息数据
-            
-        返回:
-            解析后的消息信息
         """
         try:
-            parsed = {
+            msg_type = message.get('type', 0)
+            parsed_content = {}
+            
+            if msg_type == 1:
+                parsed_content['type'] = '文本'
+                parsed_content['text'] = message.get('content', '')
+                parsed_content['word_count'] = len(parsed_content['text'])
+            elif msg_type == 49:
+                parsed_content.update(self._parse_multimedia_content(message.get('content', '')))
+            else:
+                parsed_content['type'] = self.message_types.get(msg_type, '未知类型')
+                parsed_content['raw'] = message.get('content', '')
+
+            return {
                 'seq': message.get('seq'),
                 'time': message.get('time'),
                 'talker': message.get('talker'),
-                'talkerName': message.get('talkerName'),
+                'talker_name': message.get('talkerName'),
                 'sender': message.get('sender'),
-                'senderName': message.get('senderName'),
-                'isSelf': message.get('isSelf', False),
-                'type': message.get('type'),
-                'subType': message.get('subType'),
-                'content': message.get('content', ''),
-                'contents': message.get('contents', {}),
-                'parsed_content': None,
-                'file_info': None,
-                'message_type_name': self.message_types.get(message.get('type'), '未知类型')
+                'sender_name': message.get('senderName'),
+                'is_self': message.get('isSelf', False),
+                'type': msg_type,
+                'sub_type': message.get('subType'),
+                'parsed_content': parsed_content,
             }
-            
-            # 根据消息类型进行特殊解析
-            if parsed['type'] == 49:  # 多媒体消息
-                parsed['file_info'] = self._parse_file_message(message)
-            elif parsed['type'] == 1:  # 文本消息
-                parsed['parsed_content'] = self._parse_text_message(message)
-            
-            return parsed
             
         except Exception as e:
             logger.error(f"解析消息失败: {str(e)}, 消息: {message}")
             return message
-    
-    def _parse_file_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        解析文件消息
-        
-        参数:
-            message: 文件消息数据
-            
-        返回:
-            解析后的文件信息
-        """
-        try:
-            content = message.get('content', '')
-            if not content:
-                return None
-            
-            # 解析XML内容
-            root = ET.fromstring(content)
-            
-            # 获取appmsg节点
-            appmsg = root.find('appmsg')
-            if appmsg is None:
-                return None
-            
-            # 获取文件信息
-            title = appmsg.find('title')
-            title_text = title.text if title is not None else ''
-            
-            # 获取appattach节点（文件附件信息）
-            appattach = appmsg.find('appattach')
-            if appattach is None:
-                return None
-            
-            file_info = {
-                'title': title_text,
-                'fileext': appattach.find('fileext').text if appattach.find('fileext') is not None else '',
-                'totallen': appattach.find('totallen').text if appattach.find('totallen') is not None else '0',
-                'attachid': appattach.find('attachid').text if appattach.find('attachid') is not None else '',
-                'md5': appmsg.find('md5').text if appmsg.find('md5') is not None else '',
-                'subtype': message.get('subType'),
-                'subtype_name': self.file_subtypes.get(message.get('subType'), '未知子类型')
-            }
-            
-            # 从contents中获取额外信息
-            contents = message.get('contents', {})
-            if contents:
-                file_info.update(contents)
-            
-            return file_info
-            
-        except Exception as e:
-            logger.error(f"解析文件消息失败: {str(e)}")
-            return None
-    
-    def _parse_text_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        解析文本消息
-        
-        参数:
-            message: 文本消息数据
-            
-        返回:
-            解析后的文本信息
-        """
-        content = message.get('content', '')
-        
-        return {
-            'text': content,
-            'word_count': len(content),
-            'has_keywords': self._check_keywords(content)
-        }
-    
-    def _check_keywords(self, text: str) -> Dict[str, int]:
-        """
-        检查文本中的关键词
-        
-        参数:
-            text: 文本内容
-            
-        返回:
-            关键词统计
-        """
-        # 定义关键词列表
-        positive_keywords = ['好的', '收到', '没问题', '可以', '行', 'OK', 'ok', '嗯', '是的']
-        negative_keywords = ['不行', '做不了', '有问题', '不能', '不可以', '不行', 'NO', 'no']
-        
-        result = {
-            'positive': 0,
-            'negative': 0
-        }
-        
-        for keyword in positive_keywords:
-            result['positive'] += text.count(keyword)
-        
-        for keyword in negative_keywords:
-            result['negative'] += text.count(keyword)
-        
-        return result
 
-class EmployeeMatcher:
+class ChatLogProcessor:
     """
-    员工匹配器
-    负责将微信昵称与真实员工信息进行匹配
-    """
-    
-    def __init__(self):
-        """初始化匹配器"""
-        self.similarity_threshold = 0.6  # 相似度阈值
-    
-    def match_employee(self, sender_name: str, employees: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """
-        匹配员工信息
-        
-        参数:
-            sender_name: 发送者昵称
-            employees: 员工列表
-            
-        返回:
-            匹配到的员工信息
-        """
-        if not employees or not sender_name:
-            return None
-        
-        best_match = None
-        best_score = 0
-        
-        for employee in employees:
-            # 多维度匹配
-            scores = []
-            
-            # 1. 微信昵称匹配
-            if employee.get('wechat_nickname'):
-                score = self._calculate_similarity(sender_name, employee['wechat_nickname'])
-                scores.append(score)
-            
-            # 2. 真实姓名匹配
-            if employee.get('real_name'):
-                score = self._calculate_similarity(sender_name, employee['real_name'])
-                scores.append(score)
-            
-            # 3. 姓名缩写匹配
-            if employee.get('name_abbreviation'):
-                score = self._calculate_similarity(sender_name, employee['name_abbreviation'])
-                scores.append(score)
-            
-            # 取最高分
-            if scores:
-                max_score = max(scores)
-                if max_score > best_score and max_score >= self.similarity_threshold:
-                    best_score = max_score
-                    best_match = employee
-                    best_match['match_score'] = max_score
-        
-        return best_match
-    
-    def _calculate_similarity(self, str1: str, str2: str) -> float:
-        """
-        计算两个字符串的相似度
-        
-        参数:
-            str1: 字符串1
-            str2: 字符串2
-            
-        返回:
-            相似度分数 (0-1)
-        """
-        if not str1 or not str2:
-            return 0.0
-        
-        # 使用SequenceMatcher计算相似度
-        return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
-
-class ChatlogProcessor:
-    """
-    聊天记录处理器
-    整合了解析、匹配、去重等功能
+    聊天记录处理器 - 重构版
+    负责对整个聊天记录列表进行处理，包括去重、关联等
     """
     
     def __init__(self):
         """初始化处理器"""
         self.parser = ChatMessageParser()
-        self.matcher = EmployeeMatcher()
         self.processed_seqs = set()  # 已处理的消息序列号
-    
+        
+    def _associate_employee(self, sender_name: str, employees: List[Dict[str, Any]], group_type: str = 'unknown') -> Tuple[Optional[Dict], str]:
+        """
+        将发件人姓名与员工列表进行模糊匹配
+        支持内部/外部群的角色区分
+        """
+        if not sender_name or not employees:
+            return None, 'unknown'
+
+        best_match = None
+        highest_score = 0.6  # 相似度阈值
+
+        for employee in employees:
+            # 获取员工的各种名称进行匹配
+            wechat_nickname = employee.get('wechat_nickname', '')
+            real_name = employee.get('real_name', '')
+            name_abbreviation = employee.get('name_abbreviation', '')
+            
+            # 计算相似度
+            scores = []
+            
+            if wechat_nickname:
+                scores.append(SequenceMatcher(None, sender_name, wechat_nickname).ratio())
+            
+            if real_name:
+                scores.append(SequenceMatcher(None, sender_name, real_name).ratio())
+            
+            if name_abbreviation:
+                scores.append(SequenceMatcher(None, sender_name, name_abbreviation).ratio())
+            
+            # 取最高分
+            if scores:
+                max_score = max(scores)
+                if max_score > highest_score:
+                    highest_score = max_score
+                    best_match = employee
+        
+        if best_match:
+            return best_match, 'employee'
+        
+        # 如果是在外部群且没匹配到员工，则认为是客户
+        if group_type == 'external':
+            return {'name': sender_name, 'role': '外部客户'}, 'client'
+            
+        return None, 'unmatched'
+
+    def _parse_filename_components(self, filename: str) -> Dict[str, str]:
+        """
+        解析文件名组件，支持多种格式
+        格式: [YYMMDD]-[项目名]-[工单名/内容描述]-[工作量]-[作者缩写]-[版本号].扩展名
+        """
+        components = {
+            'date': '',
+            'project_name': '',
+            'work_order': '',
+            'workload': '',
+            'author_abbreviation': '',
+            'version': '',
+            'extension': '',
+            'is_standard_format': False
+        }
+        
+        try:
+            # 尝试标准格式解析
+            match = self.parser.filename_parse_regex.match(filename)
+            if match:
+                components.update({
+                    'date': match.group(1),
+                    'project_name': match.group(2),
+                    'work_order': match.group(3),
+                    'workload': match.group(4),
+                    'author_abbreviation': match.group(5),
+                    'version': match.group(6),
+                    'extension': match.group(7),
+                    'is_standard_format': True
+                })
+            else:
+                # 非标准格式，尝试简单解析
+                components['project_name'] = self._extract_project_name_simple(filename)
+                components['extension'] = self._extract_extension_simple(filename)
+                
+        except Exception as e:
+            logger.error(f"解析文件名组件失败: {str(e)}, 文件名: {filename}")
+        
+        return components
+
+    def _extract_project_name_simple(self, filename: str) -> str:
+        """简单提取项目名称"""
+        # 常见的项目名称模式
+        patterns = [
+            r'(\w+项目)',  # 匹配"项目"结尾
+            r'(\w+天地)',  # 匹配"天地"结尾
+            r'(\w+府)',    # 匹配"府"结尾
+            r'(\w+城)',    # 匹配"城"结尾
+            r'(\w+园)',    # 匹配"园"结尾
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, filename)
+            if match:
+                return match.group(1)
+        
+        return '未知项目'
+
+    def _extract_extension_simple(self, filename: str) -> str:
+        """简单提取文件扩展名"""
+        ext_match = re.search(r'\.([a-zA-Z0-9]+)$', filename)
+        return ext_match.group(1).lower() if ext_match else ''
+
+    def _create_file_record(self, parsed_message: Dict[str, Any], employee: Optional[Dict], role: str, group_info: Dict) -> Optional[Dict]:
+        """
+        创建文件记录
+        """
+        content = parsed_message.get('parsed_content', {})
+        filename = content.get('filename')
+
+        if not filename:
+            return None
+
+        # 解析文件名组件
+        filename_components = self._parse_filename_components(filename)
+        
+        # 确定项目名称（优先使用解析出的，否则使用群聊信息）
+        project_name = filename_components['project_name']
+        if not project_name or project_name == '未知项目':
+            project_name = group_info.get('project_name', '未知项目')
+
+        return {
+            'original_name': filename,
+            'standardized_name': filename,  # 可以后续标准化
+            'project_name': project_name,
+            'work_order': filename_components['work_order'],
+            'workload': filename_components['workload'],
+            'author_abbreviation': filename_components['author_abbreviation'],
+            'version': filename_components['version'],
+            'file_extension': filename_components['extension'],
+            'upload_time': parsed_message.get('time'),
+            'uploader': parsed_message.get('sender_name'),
+            'file_size': '0',  # 暂时设为0，后续可以从content中提取
+            'status': 'pending',
+            'employee_id': employee.get('id') if employee and role == 'employee' else None,
+            'chatroom_name': group_info.get('chatroom_name'),
+            'message_seq': parsed_message.get('seq'),
+            'is_standard_format': filename_components['is_standard_format'],
+            'sender_role': role,
+            'group_type': group_info.get('group_type', 'unknown')
+        }
+
+    def _create_chat_message(self, parsed_message: Dict[str, Any], employee: Optional[Dict], role: str) -> Dict[str, Any]:
+        """
+        创建聊天消息记录
+        """
+        return {
+            'message_id': parsed_message.get('seq'),
+            'talker_name': parsed_message.get('talker_name'),
+            'sender_name': parsed_message.get('sender_name'),
+            'message_type': parsed_message.get('type'),
+            'content': parsed_message.get('parsed_content', {}).get('text', ''),
+            'timestamp': parsed_message.get('time'),
+            'employee_id': employee.get('id') if employee and role == 'employee' else None,
+            'sender_role': role
+        }
+
     def process_chatlog(self, 
                        chatlog: List[Dict[str, Any]], 
-                       employees: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+                       employees: List[Dict[str, Any]] = None,
+                       group_info: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        处理聊天记录
+        处理聊天记录 - 重构版
         
         参数:
-            chatlog: 聊天记录列表
-            employees: 员工列表（用于人员匹配）
-            
+            chatlog: 原始聊天记录列表
+            employees: 员工列表（用于匹配）
+            group_info: 群聊信息 {'chatroom_name': '群名', 'project_name': '项目名', 'group_type': 'internal/external'}
+        
         返回:
             处理结果
         """
-        result = {
-            "total_messages": len(chatlog),
-            "processed_messages": 0,
-            "duplicate_messages": 0,
-            "file_messages": 0,
-            "text_messages": 0,
-            "matched_employees": 0,
-            "unmatched_employees": 0,
-            "file_records": [],
-            "chat_messages": [],
-            "employee_stats": {}
-        }
-        
-        for message in chatlog:
-            try:
-                # 检查是否已处理过
-                seq = message.get('seq')
-                if seq in self.processed_seqs:
-                    result["duplicate_messages"] += 1
-                    continue
-                
-                # 解析消息
-                parsed_message = self.parser.parse_message(message)
-                
-                # 人员匹配
-                matched_employee = None
-                if employees and parsed_message.get('senderName'):
-                    matched_employee = self.matcher.match_employee(
-                        parsed_message['senderName'], 
-                        employees
-                    )
-                
-                if matched_employee:
-                    result["matched_employees"] += 1
-                    # 更新员工统计
-                    emp_id = matched_employee.get('id')
-                    if emp_id not in result["employee_stats"]:
-                        result["employee_stats"][emp_id] = {
-                            "employee": matched_employee,
-                            "message_count": 0,
-                            "file_count": 0
-                        }
-                    result["employee_stats"][emp_id]["message_count"] += 1
-                else:
-                    result["unmatched_employees"] += 1
-                
-                # 创建聊天消息记录
-                chat_message = self._create_chat_message(parsed_message, matched_employee)
-                if chat_message:
-                    result["chat_messages"].append(chat_message)
-                    result["text_messages"] += 1
-                
-                # 处理文件消息
-                if parsed_message.get('file_info'):
-                    file_record = self._create_file_record(parsed_message, matched_employee)
-                    if file_record:
-                        result["file_records"].append(file_record)
-                        result["file_messages"] += 1
-                        # 更新员工文件统计
-                        if matched_employee:
-                            emp_id = matched_employee.get('id')
-                            if emp_id in result["employee_stats"]:
-                                result["employee_stats"][emp_id]["file_count"] += 1
-                
-                # 标记为已处理
-                if seq:
+        try:
+            # 设置默认群聊信息
+            if not group_info:
+                group_info = {
+                    'chatroom_name': '未知群聊',
+                    'project_name': '未知项目',
+                    'group_type': 'unknown'
+                }
+            
+            result = {
+                'total_messages': len(chatlog),
+                'processed_messages': 0,
+                'duplicate_messages': 0,
+                'file_messages': 0,
+                'text_messages': 0,
+                'other_messages': 0,
+                'matched_employees': 0,
+                'unmatched_employees': 0,
+                'client_messages': 0,
+                'parsed_messages': [],
+                'file_records': [],
+                'chat_messages': [],
+                'employee_stats': {},
+                'errors': []
+            }
+            
+            for message in chatlog:
+                try:
+                    # 检查是否已处理过（去重）
+                    seq = message.get('seq')
+                    if seq in self.processed_seqs:
+                        result['duplicate_messages'] += 1
+                        continue
+                    
                     self.processed_seqs.add(seq)
-                result["processed_messages"] += 1
-                
-            except Exception as e:
-                logger.error(f"处理消息失败: {str(e)}, 消息: {message}")
-                continue
-        
-        return result
-    
-    def _create_file_record(self, parsed_message: Dict[str, Any], employee: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """
-        创建文件记录
-        
-        参数:
-            parsed_message: 解析后的消息
-            employee: 匹配的员工信息
+                    result['processed_messages'] += 1
+                    
+                    # 解析消息
+                    parsed_message = self.parser.parse_message(message)
+                    
+                    # 匹配员工
+                    if employees:
+                        matched_employee, role = self._associate_employee(
+                            parsed_message['sender_name'], 
+                            employees,
+                            group_info.get('group_type', 'unknown')
+                        )
+                        
+                        if role == 'employee':
+                            result['matched_employees'] += 1
+                            # 统计员工消息数量
+                            emp_id = matched_employee['id']
+                            if emp_id not in result['employee_stats']:
+                                result['employee_stats'][emp_id] = {
+                                    'employee': matched_employee,
+                                    'message_count': 0,
+                                    'file_count': 0
+                                }
+                            result['employee_stats'][emp_id]['message_count'] += 1
+                        elif role == 'client':
+                            result['client_messages'] += 1
+                        else:
+                            result['unmatched_employees'] += 1
+                    else:
+                        matched_employee = None
+                        role = 'unknown'
+                    
+                    # 统计消息类型
+                    msg_type = parsed_message.get('type')
+                    if msg_type == 49 and parsed_message.get('parsed_content', {}).get('filename'):
+                        result['file_messages'] += 1
+                        if employees and matched_employee and role == 'employee':
+                            emp_id = matched_employee['id']
+                            result['employee_stats'][emp_id]['file_count'] += 1
+                        
+                        # 创建文件记录
+                        file_record = self._create_file_record(parsed_message, matched_employee, role, group_info)
+                        if file_record:
+                            result['file_records'].append(file_record)
+                    
+                    elif msg_type == 1:
+                        result['text_messages'] += 1
+                    else:
+                        result['other_messages'] += 1
+                    
+                    # 创建聊天消息记录
+                    chat_message = self._create_chat_message(parsed_message, matched_employee, role)
+                    result['chat_messages'].append(chat_message)
+                    
+                    result['parsed_messages'].append(parsed_message)
+                    
+                except Exception as e:
+                    error_msg = f"处理消息失败: {str(e)}, seq: {message.get('seq')}"
+                    logger.error(error_msg)
+                    result['errors'].append(error_msg)
             
-        返回:
-            文件记录
-        """
-        file_info = parsed_message.get('file_info')
-        if not file_info:
-            return None
-        
-        # 解析文件名规范
-        filename = file_info.get('title', '')
-        project_name = self._extract_project_name(filename)
-        work_order = self._extract_work_order(filename)
-        workload = self._extract_workload(filename)
-        author = self._extract_author(filename)
-        version = self._extract_version(filename)
-        
-        return {
-            'filename': filename,
-            'file_ext': file_info.get('fileext', ''),
-            'file_size': int(file_info.get('totallen', 0)),
-            'file_md5': file_info.get('md5', ''),
-            'project_name': project_name,
-            'work_order': work_order,
-            'workload': workload,
-            'author': author,
-            'version': version,
-            'upload_time': parsed_message.get('time'),
-            'uploader_name': parsed_message.get('senderName'),
-            'employee_id': employee.get('id') if employee else None,
-            'chatroom_name': parsed_message.get('talkerName'),
-            'message_seq': parsed_message.get('seq')
-        }
-    
-    def _create_chat_message(self, parsed_message: Dict[str, Any], employee: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """
-        创建聊天消息记录
-        
-        参数:
-            parsed_message: 解析后的消息
-            employee: 匹配的员工信息
+            logger.info(f"聊天记录处理完成："
+                       f"总消息 {result['total_messages']} 条，"
+                       f"处理 {result['processed_messages']} 条，"
+                       f"文件 {result['file_messages']} 个，"
+                       f"去重 {result['duplicate_messages']} 条，"
+                       f"员工匹配 {result['matched_employees']} 个，"
+                       f"客户消息 {result['client_messages']} 条")
             
-        返回:
-            聊天消息记录
-        """
-        return {
-            'message_seq': parsed_message.get('seq'),
-            'message_time': parsed_message.get('time'),
-            'sender_name': parsed_message.get('senderName'),
-            'sender_id': parsed_message.get('sender'),
-            'message_type': parsed_message.get('type'),
-            'message_content': parsed_message.get('content', ''),
-            'chatroom_name': parsed_message.get('talkerName'),
-            'chatroom_id': parsed_message.get('talker'),
-            'employee_id': employee.get('id') if employee else None,
-            'is_self': parsed_message.get('isSelf', False),
-            'keywords': parsed_message.get('parsed_content', {}).get('has_keywords', {})
-        }
-    
-    def _extract_project_name(self, filename: str) -> str:
-        """从文件名中提取项目名称"""
-        # 文件名格式: [YYMMDD]-[项目名]-[工单名/内容描述]-[工作量]-[作者缩写]-[版本号].扩展名
-        parts = filename.split('-')
-        if len(parts) >= 2:
-            return parts[1]
-        return ''
-    
-    def _extract_work_order(self, filename: str) -> str:
-        """从文件名中提取工单名"""
-        parts = filename.split('-')
-        if len(parts) >= 3:
-            return parts[2]
-        return ''
-    
-    def _extract_workload(self, filename: str) -> str:
-        """从文件名中提取工作量"""
-        parts = filename.split('-')
-        if len(parts) >= 4:
-            return parts[3]
-        return ''
-    
-    def _extract_author(self, filename: str) -> str:
-        """从文件名中提取作者缩写"""
-        parts = filename.split('-')
-        if len(parts) >= 5:
-            return parts[4]
-        return ''
-    
-    def _extract_version(self, filename: str) -> str:
-        """从文件名中提取版本号"""
-        parts = filename.split('-')
-        if len(parts) >= 6:
-            return parts[5].split('.')[0]  # 去掉扩展名
-        return ''
+            return result
+            
+        except Exception as e:
+            logger.error(f"处理聊天记录失败: {str(e)}")
+            return {
+                'error': str(e),
+                'total_messages': len(chatlog),
+                'processed_messages': 0,
+                'file_records': [],
+                'chat_messages': []
+            }
     
     def clear_processed_seqs(self):
-        """清空已处理的消息序列号"""
-        self.processed_seqs.clear() 
+        """清空已处理的消息序列号（用于重新同步）"""
+        self.processed_seqs.clear()
+        logger.info("已清空处理记录，可以重新同步") 

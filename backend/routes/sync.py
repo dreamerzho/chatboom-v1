@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import logging
 from typing import Dict, List, Any
+import requests
 
 # 导入数据库模型和 chatlog 集成
 from models.project import Project
@@ -14,27 +15,347 @@ from models.file import FileRecord
 from models.employee import EmployeeMapping
 from chatlog_integration import chatlog_client
 from db import db
+from data_manager import data_manager
 
+# 创建蓝图
 sync_bp = Blueprint('sync', __name__, url_prefix='/api/v1/sync')
 logger = logging.getLogger(__name__)
+
+@sync_bp.route('/project', methods=['POST'])
+def sync_project_data():
+    """
+    同步项目数据
+    
+    请求参数:
+        project_name: 项目名称
+        chatroom_names: 群聊名称列表
+        start_date: 开始日期 (YYYY-MM-DD)
+        end_date: 结束日期 (YYYY-MM-DD)
+        force_resync: 是否强制重新同步 (可选，默认false)
+    
+    返回:
+        同步结果
+    """
+    try:
+        data = request.get_json()
+        
+        # 验证必填参数
+        required_fields = ['project_name', 'chatroom_names', 'start_date', 'end_date']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f'缺少必填参数: {field}'
+                }), 400
+        
+        project_name = data['project_name']
+        chatroom_names = data['chatroom_names']
+        start_date = data['start_date']
+        end_date = data['end_date']
+        force_resync = data.get('force_resync', False)
+        
+        # 验证参数格式
+        if not isinstance(chatroom_names, list) or len(chatroom_names) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'chatroom_names 必须是非空列表'
+            }), 400
+        
+        # 验证日期格式
+        try:
+            datetime.strptime(start_date, '%Y-%m-%d')
+            datetime.strptime(end_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({
+                'success': False,
+                'error': '日期格式错误，请使用 YYYY-MM-DD 格式'
+            }), 400
+        
+        # 验证日期范围
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        if start_dt > end_dt:
+            return jsonify({
+                'success': False,
+                'error': '开始日期不能晚于结束日期'
+            }), 400
+        
+        # 检查日期范围是否过大（超过90天）
+        date_diff = (end_dt - start_dt).days
+        if date_diff > 90:
+            return jsonify({
+                'success': False,
+                'error': '日期范围不能超过90天'
+            }), 400
+        
+        logger.info(f"开始同步项目数据: {project_name}, 群聊: {chatroom_names}, "
+                   f"时间范围: {start_date} ~ {end_date}, 强制同步: {force_resync}")
+        
+        # 调用数据管理器进行同步
+        result = data_manager.sync_project_data(
+            project_name=project_name,
+            chatroom_names=chatroom_names,
+            start_date=start_date,
+            end_date=end_date,
+            force_resync=force_resync
+        )
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': f'项目 {project_name} 数据同步成功',
+                'data': result['sync_result']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"同步项目数据失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'服务器内部错误: {str(e)}'
+        }), 500
+
+@sync_bp.route('/employee-stats/<int:employee_id>', methods=['GET'])
+def get_employee_stats(employee_id):
+    """
+    获取员工统计数据
+    
+    路径参数:
+        employee_id: 员工ID
+    
+    查询参数:
+        start_date: 开始日期 (可选)
+        end_date: 结束日期 (可选)
+    
+    返回:
+        员工统计数据
+    """
+    try:
+        # 获取查询参数
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # 验证日期格式
+        if start_date:
+            try:
+                datetime.strptime(start_date, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({
+                    'success': False,
+                    'error': 'start_date 格式错误，请使用 YYYY-MM-DD 格式'
+                }), 400
+        
+        if end_date:
+            try:
+                datetime.strptime(end_date, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({
+                    'success': False,
+                    'error': 'end_date 格式错误，请使用 YYYY-MM-DD 格式'
+                }), 400
+        
+        logger.info(f"获取员工 {employee_id} 统计数据，时间范围: {start_date} ~ {end_date}")
+        
+        # 调用数据管理器获取统计数据
+        result = data_manager.get_employee_stats(
+            employee_id=employee_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        if result['success']:
+            return jsonify(result)
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"获取员工统计失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'服务器内部错误: {str(e)}'
+        }), 500
+
+@sync_bp.route('/project-stats/<int:project_id>', methods=['GET'])
+def get_project_stats(project_id):
+    """
+    获取项目统计数据
+    
+    路径参数:
+        project_id: 项目ID
+    
+    返回:
+        项目统计数据
+    """
+    try:
+        logger.info(f"获取项目 {project_id} 统计数据")
+        
+        # 调用数据管理器获取统计数据
+        result = data_manager.get_project_stats(project_id=project_id)
+        
+        if result['success']:
+            return jsonify(result)
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"获取项目统计失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'服务器内部错误: {str(e)}'
+        }), 500
+
+@sync_bp.route('/unmapped-senders', methods=['GET'])
+def get_unmapped_senders():
+    """
+    获取未映射的微信用户列表
+    
+    返回:
+        未映射用户列表
+    """
+    try:
+        logger.info("获取未映射的微信用户列表")
+        
+        # 调用数据管理器获取未映射用户
+        result = data_manager.get_unmapped_senders()
+        
+        if result['success']:
+            return jsonify(result)
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"获取未映射用户列表失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'服务器内部错误: {str(e)}'
+        }), 500
+
+@sync_bp.route('/employee-mappings', methods=['POST'])
+def batch_add_employee_mappings():
+    """
+    批量添加员工映射
+    
+    请求参数:
+        mappings: 员工映射列表
+            - wechat_nickname: 微信昵称
+            - real_name: 真实姓名
+            - position: 职位
+            - name_abbreviation: 姓名缩写
+            - role: 角色 (可选，默认"内部员工")
+    
+    返回:
+        批量添加结果
+    """
+    try:
+        data = request.get_json()
+        
+        # 验证必填参数
+        if 'mappings' not in data:
+            return jsonify({
+                'success': False,
+                'error': '缺少必填参数: mappings'
+            }), 400
+        
+        mappings = data['mappings']
+        
+        if not isinstance(mappings, list) or len(mappings) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'mappings 必须是非空列表'
+            }), 400
+        
+        logger.info(f"批量添加员工映射，数量: {len(mappings)}")
+        
+        # 调用数据管理器批量添加
+        result = data_manager.batch_add_employee_mappings(mappings)
+        
+        if result['success']:
+            return jsonify(result)
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"批量添加员工映射失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'服务器内部错误: {str(e)}'
+        }), 500
 
 @sync_bp.route('/status', methods=['GET'])
 def get_sync_status():
     """
-    获取 chatlog 服务状态
-    用于检查 chatlog 服务是否正常运行
+    获取同步状态
+    
+    返回:
+        系统同步状态信息
     """
     try:
-        status = chatlog_client.check_service_status()
+        # 获取基本统计信息
+        project_count = Project.query.count()
+        employee_count = EmployeeMapping.query.count()
+        file_count = FileRecord.query.count()
+        message_count = ChatMessage.query.count()
+        
+        # 获取最近同步的项目
+        recent_projects = Project.query.order_by(Project.updated_at.desc()).limit(5).all()
+        
+        # 获取活跃员工
+        from sqlalchemy import func
+        active_employees = db.session.query(
+            ChatMessage.sender_name,
+            func.count(ChatMessage.id).label('message_count')
+        ).group_by(ChatMessage.sender_name).order_by(
+            func.count(ChatMessage.id).desc()
+        ).limit(10).all()
+        
         return jsonify({
             'success': True,
-            'data': status
+            'data': {
+                'summary': {
+                    'project_count': project_count,
+                    'employee_count': employee_count,
+                    'file_count': file_count,
+                    'message_count': message_count
+                },
+                'recent_projects': [
+                    {
+                        'id': project.id,
+                        'name': project.project_name,
+                        'status': project.status,
+                        'updated_at': project.updated_at.isoformat() if project.updated_at else None
+                    } for project in recent_projects
+                ],
+                'active_employees': [
+                    {
+                        'sender_name': sender_name,
+                        'message_count': message_count
+                    } for sender_name, message_count in active_employees
+                ],
+                'last_updated': datetime.utcnow().isoformat()
+            }
         })
+        
     except Exception as e:
         logger.error(f"获取同步状态失败: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': f'服务器内部错误: {str(e)}'
         }), 500
 
 @sync_bp.route('/chatrooms', methods=['GET'])
@@ -57,7 +378,7 @@ def get_chatrooms():
         }), 500
 
 @sync_bp.route('/project/<int:project_id>', methods=['POST'])
-def sync_project_data(project_id: int):
+def sync_project_data_by_id(project_id: int):
     """
     同步指定项目的聊天记录和文件数据（增强版）
     
@@ -353,7 +674,7 @@ def sync_data():
         
         # 如果有指定项目ID，调用项目同步接口
         if project_id:
-            return sync_project_data(project_id)
+            return sync_project_data_by_id(project_id)
         
         # 否则进行全局同步
         sync_log = []
@@ -442,4 +763,19 @@ def test_chatlog_connection():
         return jsonify({
             'success': False,
             'error': str(e)
-        }), 500 
+        }), 500
+
+@sync_bp.route('/chatlog-health', methods=['GET'])
+def chatlog_health():
+    """
+    代理chatlog健康检查，前端可用此接口判断服务状态
+    只要 /api/v1/chatroom 返回200且内容非空即为"正常"
+    """
+    try:
+        resp = requests.get("http://127.0.0.1:5030/api/v1/chatroom", params={"format": "json"}, timeout=5)
+        if resp.status_code == 200 and resp.text and resp.text.strip() not in ('', '{}', '[]'):
+            return jsonify({"status": "ok", "message": "chatlog服务正常"}), 200
+        else:
+            return jsonify({"status": "error", "message": "chatlog服务无数据或异常"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"无法连接chatlog服务: {str(e)}"}), 500 

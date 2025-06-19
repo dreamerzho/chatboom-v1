@@ -12,13 +12,18 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask
 from sqlalchemy import func
-from config import SQLALCHEMY_DATABASE_URI
-from app import db, EmployeeMapping, Project, FileRecord, ChatMessage
+from config import Config
+from db import db
+
+# 导入模型
+from models.employee import EmployeeMapping
+from models.project import Project
+from models.file import FileRecord
+from models.chat import ChatMessage
 
 # 创建Flask应用
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = SQLALCHEMY_DATABASE_URI
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config.from_object(Config)
 db.init_app(app)
 
 def check_database_status():

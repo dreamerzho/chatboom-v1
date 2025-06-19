@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from urllib.parse import quote
-from chatlog_processor import ChatlogProcessor
+from chatlog_processor import ChatLogProcessor
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ class ChatlogIntegration:
             'Accept': 'application/json'
         })
         # 初始化聊天记录处理器
-        self.processor = ChatlogProcessor()
+        self.processor = ChatLogProcessor()
     
     def check_service_status(self) -> Dict[str, Any]:
         """
