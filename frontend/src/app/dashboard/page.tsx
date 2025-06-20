@@ -1,301 +1,328 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>服务监测系统</title>
-    <!-- 引入 Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 Chart.js 用于图表渲染 -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- 引入 Google Fonts 优化字体显示 -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
-    <style>
-        /* 使用更美观的字体和滚动条样式 */
-        body { font-family: 'Inter', sans-serif; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
-    </style>
-</head>
-<body class="bg-slate-50 font-sans text-slate-800">
+// 数据概览页面 - V2 (样式复刻版 - 参照新设计图)
+// 页面功能:
+// 1. 顶部Header，包含页面标题、时间筛选和用户头像。
+// 2. 四个核心KPI统计卡片，样式完全复刻设计图。
+// 3. 团队工作量趋势图和实时风险流。
+// 4. 新增"团队效能榜"模块，按岗位分类展示员工效能。
+// 5. 新增"项目风险榜"模块，展示各项目健康分与风险。
 
-    <div id="app-container" class="flex min-h-screen">
-        <!-- 左侧导航栏 -->
-        <aside class="w-64 bg-slate-900 text-slate-200 flex-col flex-shrink-0 hidden lg:flex">
-            <div class="p-6 text-2xl font-bold text-white border-b border-slate-700 h-20 flex items-center">
-                <span>服务监测系统</span>
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Card, Row, Col, Statistic, Typography, Spin, List, Table, Tabs, Space, Avatar, Dropdown, Menu } from 'antd';
+import { DownOutlined, ExclamationCircleFilled, CheckCircleFilled, ClockCircleFilled } from '@ant-design/icons';
+import { Bar, Line } from '@ant-design/plots';
+
+const { Title, Text } = Typography;
+const { TabPane } = Tabs;
+
+// --- 模拟数据 ---
+
+const mockData = {
+  user: {
+    name: '秦若否',
+    avatar: 'https://i.pravatar.cc/150?img=1'
+  },
+  kpi: {
+    team_load: { high: 3, medium: 75, low: 9 },
+    project_health: { healthy: 1, warning: 1, risk: 1 },
+    pending_risks: 7,
+    avg_finalize_hours: {
+      value: 48.5,
+      change: -0.05, // -5%
+      trend: [12, 15, 13, 18, 16, 20, 19]
+    }
+  },
+  workload_trend: [
+    { date: '06-13', value: 25, type: '总计WE' }, { date: '06-14', value: 30, type: '总计WE' },
+    { date: '06-15', value: 28, type: '总计WE' }, { date: '06-16', value: 35, type: '总计WE' },
+    { date: '06-17', value: 45, type: '总计WE' }, { date: '06-18', value: 42, type: '总计WE' },
+    { date: '06-19', value: 50, type: '总计WE' },
+    { date: '06-13', value: 5, type: '过程成本WE' }, { date: '06-14', value: 8, type: '过程成本WE' },
+    { date: '06-15', value: 7, type: '过程成本WE' }, { date: '06-16', value: 10, type: '过程成本WE' },
+    { date: '06-17', value: 15, type: '过程成本WE' }, { date: '06-18', value: 12, type: '过程成本WE' },
+    { date: '06-19', value: 18, type: '过程成本WE' },
+  ],
+  risk_feed: [
+    { id: '1', type: 'danger', project: 'SKP项目', description: '主视觉海报已迭代8次', time: '2小时前' },
+    { id: '2', type: 'warning', project: '越城天地', description: '内部群提及"又要改"', time: '5小时前' },
+    { id: '3', type: 'danger', project: '王五', description: '在【SKP项目】的迭代次数高于其个人基线70%', time: '1天前' },
+  ],
+  team_performance: {
+    design: [
+      { key: '1', employee: '张三', output_we: 12.5, process_we: 3.2, avg_iteration: 2.1 },
+      { key: '2', employee: '王五', output_we: 8.0, process_we: 2.5, avg_iteration: 5.8 },
+    ],
+    copywriting: [
+      { key: '1', employee: '李四', output_we: 10.2, process_we: 1.8, avg_iteration: 1.5 },
+    ],
+    pm_ae: [
+       { key: '1', employee: '赵六', output_we: 15.0, process_we: 4.1, avg_iteration: 1.2 },
+    ]
+  },
+  project_risks: [
+    { key: '1', project: 'SKP项目', health_score: 45, main_risk: '迭代次数过高' },
+    { key: '2', project: '越城天地', health_score: 68, main_risk: '定稿周期长' },
+    { key: '3', project: '金陵中环', health_score: 92, main_risk: '-' },
+  ]
+};
+
+
+// --- 组件定义 ---
+
+// 团队效能榜表格列定义
+const performanceColumns = [
+  { title: '设计师', dataIndex: 'employee', key: 'employee' },
+  { title: '产出WE', dataIndex: 'output_we', key: 'output_we', render: (val:number) => <Text style={{color: val > 10 ? '#3f8600' : 'inherit'}}>{val}</Text> },
+  { title: '过程成本WE', dataIndex: 'process_we', key: 'process_we', render: (val:number) => <Text style={{color: val > 3.0 ? '#cf1322' : 'inherit'}}>{val}</Text> },
+  { title: '平均迭代', dataIndex: 'avg_iteration', key: 'avg_iteration', render: (val:number) => <Text style={{color: val > 4.0 ? '#cf1322' : 'inherit'}}>{val}</Text> },
+];
+
+// 项目风险榜表格列定义
+const riskColumns = [
+  { title: '项目', dataIndex: 'project', key: 'project' },
+  { 
+    title: '健康分', 
+    dataIndex: 'health_score', 
+    key: 'health_score',
+    render: (score: number) => (
+      <Text style={{ color: score < 60 ? '#cf1322' : score < 80 ? '#faad14' : '#3f8600', fontWeight: 'bold' }}>
+        {score}
+      </Text>
+    )
+  },
+  { title: '主要风险', dataIndex: 'main_risk', key: 'main_risk' },
+];
+
+// 风险流图标
+const riskIcons = {
+  danger: <ExclamationCircleFilled style={{ color: '#f5222d', fontSize: '24px' }} />,
+  warning: <ClockCircleFilled style={{ color: '#faad14', fontSize: '24px' }} />,
+  default: <CheckCircleFilled style={{ color: '#52c41a', fontSize: '24px' }} />,
+};
+
+// 时间筛选菜单
+const timeMenu: React.ReactElement = (
+  <Menu>
+    <Menu.Item key="1">最近7天</Menu.Item>
+    <Menu.Item key="2">最近30天</Menu.Item>
+    <Menu.Item key="3">本月</Menu.Item>
+  </Menu>
+);
+
+
+// 主页面组件
+function DashboardPageV2() {
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => { setLoading(false); }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // 主图表配置
+  const workloadChartConfig = {
+    data: mockData.workload_trend,
+    isGroup: true,
+    xField: 'date',
+    yField: 'value',
+    seriesField: 'type',
+    dodgePadding: 4,
+    color: ['#1890ff', '#52c41a'],
+    yAxis: {
+      value: { title: { text: '总计工作当量(WE)', style: { fontSize:12 } } },
+      processWE: { title: { text: '过程成本(WE)', style: { fontSize:12 } } },
+    },
+    geometryOptions: [
+      { geometry: 'column' },
+      { geometry: 'line', point: {}, lineStyle: { lineWidth: 3 } }
+    ],
+    legend: { position: 'top-right' as const, offsetY: -10 },
+    maintainAspectRatio: false,
+  };
+
+  // KPI卡片内嵌微型图表配置
+  const tinyLineConfig = {
+    height: 60,
+    autoFit: true,
+    data: mockData.kpi.avg_finalize_hours.trend,
+    smooth: true,
+    xAxis: false,
+    yAxis: false,
+    tooltip: false,
+    lineStyle: {
+        stroke: '#1890ff',
+        lineWidth: 2,
+    },
+  };
+
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 140px)' }}>
+        <Spin size="large" tip="正在生成数据概览..." />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* 页头 */}
+      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+        <Col>
+          <Title level={2} style={{ margin: 0 }}>数据概览</Title>
+        </Col>
+        <Col>
+          <Space align="center" size="large">
+            <Dropdown overlay={timeMenu}>
+              <a onClick={e => e.preventDefault()}>
+                <Space>
+                  最近7天
+                  <DownOutlined />
+                </Space>
+              </a>
+            </Dropdown>
+            <Avatar src={mockData.user.avatar} />
+            <Text>{mockData.user.name}</Text>
+          </Space>
+        </Col>
+      </Row>
+
+      {/* KPI 卡片 */}
+      <Row gutter={[24, 24]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} lg={6}>
+          <Card bordered={false}>
+            <Statistic
+              title="团队负荷状态"
+              valueRender={() => (
+                <Space size="small">
+                  <Text style={{ fontSize: 30, color: '#cf1322', fontWeight: 600 }}>{mockData.kpi.team_load.high}</Text>
+                  <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
+                  <Text style={{ fontSize: 30, fontWeight: 600 }}>{mockData.kpi.team_load.medium}</Text>
+                  <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
+                  <Text style={{ fontSize: 30, color: '#3f8600', fontWeight: 600 }}>{mockData.kpi.team_load.low}</Text>
+                </Space>
+              )}
+            />
+             <Text type="secondary">高 / 中 / 低</Text>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card bordered={false}>
+            <Statistic
+              title="项目健康度"
+              valueRender={() => (
+                <Space size="small">
+                  <Text style={{ fontSize: 30, color: '#3f8600', fontWeight: 600 }}>{mockData.kpi.project_health.healthy}</Text>
+                  <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
+                  <Text style={{ fontSize: 30, color: '#faad14', fontWeight: 600 }}>{mockData.kpi.project_health.warning}</Text>
+                  <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
+                  <Text style={{ fontSize: 30, color: '#cf1322', fontWeight: 600 }}>{mockData.kpi.project_health.risk}</Text>
+                </Space>
+              )}
+            />
+            <Text type="secondary">健康 / 预警 / 风险</Text>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card bordered={false}>
+            <Statistic
+              title="待处理风险"
+              value={mockData.kpi.pending_risks}
+              valueStyle={{ fontSize: 30, fontWeight: 600 }}
+            />
+            <Text type="secondary">个高优先级事项</Text>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card bordered={false}>
+             <Row>
+                <Col span={12}>
+                    <Statistic
+                      title="平均定稿周期"
+                      value={mockData.kpi.avg_finalize_hours.value}
+                      precision={1}
+                      valueStyle={{ fontSize: 30, fontWeight: 600 }}
+                      suffix="小时"
+                    />
+                    <Text type={mockData.kpi.avg_finalize_hours.change < 0 ? 'success' : 'danger'}>
+                      比上周 {mockData.kpi.avg_finalize_hours.change * 100}%
+                    </Text>
+                </Col>
+                <Col span={12}>
+                    <Line {...tinyLineConfig} />
+                </Col>
+             </Row>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 中部图表和信息流 */}
+      <Row gutter={[24, 24]} style={{ marginBottom: 24 }}>
+        <Col xs={24} lg={16}>
+          <Card bordered={false} title={<Title level={4}>团队工作量趋势 (最近7天)</Title>}>
+            <div style={{ height: 320 }}>
+              <Bar {...workloadChartConfig} />
             </div>
-            <nav class="flex-1 px-4 py-6 space-y-2">
-                <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-slate-700 text-white">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7"height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-                    <span class="font-medium">数据概览</span>
-                </a>
-                <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                    <span class="font-medium">员工视图</span>
-                </a>
-            </nav>
-        </aside>
+          </Card>
+        </Col>
+        <Col xs={24} lg={8}>
+          <Card bordered={false} title={<Title level={4}>实时风险流</Title>} style={{height: '100%'}}>
+             <List
+                itemLayout="horizontal"
+                dataSource={mockData.risk_feed}
+                renderItem={item => (
+                  <List.Item>
+                    <List.Item.Meta
+                      avatar={riskIcons[item.type as keyof typeof riskIcons]}
+                      title={<Text strong>{item.description}</Text>}
+                      description={<Text type="secondary">{item.time}</Text>}
+                    />
+                  </List.Item>
+                )}
+             />
+          </Card>
+        </Col>
+      </Row>
 
-        <!-- 右侧主内容区 -->
-        <main class="flex-1 overflow-y-auto">
-            <header class="px-8 h-20 bg-white/80 backdrop-blur-sm border-b border-slate-200 flex justify-between items-center sticky top-0 z-10">
-                <h1 class="text-2xl font-semibold text-slate-900">数据概览</h1>
-                <div class="flex items-center space-x-4">
-                    <span class="text-sm font-medium text-slate-500">最近7天</span>
-                    <div class="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-lg text-slate-500"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                    </div>
-                </div>
-            </header>
+      {/* 底部榜单 */}
+      <Row gutter={[24, 24]}>
+        <Col xs={24} lg={12}>
+          <Card bordered={false} title={<Title level={4}>团队效能榜</Title>}>
+            <Tabs defaultActiveKey="1">
+                <TabPane tab="设计" key="1">
+                    <Table 
+                        columns={performanceColumns.map(c => c.key === 'employee' ? {...c, title: '设计师'} : c)} 
+                        dataSource={mockData.team_performance.design} 
+                        pagination={false}
+                    />
+                </TabPane>
+                <TabPane tab="文案" key="2">
+                    <Table 
+                        columns={performanceColumns.map(c => c.key === 'employee' ? {...c, title: '文案'} : c)} 
+                        dataSource={mockData.team_performance.copywriting} 
+                        pagination={false}
+                    />
+                </TabPane>
+                <TabPane tab="PM/AE" key="3">
+                     <Table 
+                        columns={performanceColumns.map(c => c.key === 'employee' ? {...c, title: 'PM/AE'} : c)} 
+                        dataSource={mockData.team_performance.pm_ae} 
+                        pagination={false}
+                    />
+                </TabPane>
+            </Tabs>
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card bordered={false} title={<Title level={4}>项目风险榜</Title>}>
+             <Table columns={riskColumns} dataSource={mockData.project_risks} pagination={false} />
+          </Card>
+        </Col>
+      </Row>
 
-            <!-- 主内容区 -->
-            <div class="p-8">
-                <!-- KPI 卡片容器 -->
-                <div id="kpi-cards-container"></div>
-                
-                <!-- 中部图表和风险流 -->
-                <div class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm h-96">
-                        <canvas id="workloadChart"></canvas>
-                    </div>
-                    <div id="risk-feed-container" class="lg:col-span-1"></div>
-                </div>
-
-                <!-- 底部表格 -->
-                <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6" style="height: 340px;">
-                    <div id="team-performance-container"></div>
-                    <div id="project-risk-container"></div>
-                </div>
-            </div>
-        </main>
     </div>
+  );
+}
 
-    <script>
-        // ===================================================================
-        // 数据
-        // ===================================================================
-        const mockData = {
-          kpi: { load: { high: 3, mid: 75, low: 9 }, projectHealth: { healthy: 1, warning: 1, risk: 1 }, riskCount: 7, avgFinalHours: 48.5, avgFinalHoursChange: -5, },
-          workloadChart: { labels: ['06-13', '06-14', '06-15', '06-16', '06-17', '06-18', '06-19'], totalWE: [25, 30, 28, 35, 45, 42, 50], processWE: [5, 8, 7, 10, 15, 12, 18] },
-          riskFeed: [ { id: 1, type: 'danger', project: 'SKP项目', desc: '主视觉海报已迭代8次', time: '2小时前' }, { id: 2, type: 'warning', project: '越城天地', desc: '内部群提及"又要改"', time: '5小时前' }, { id: 3, type: 'danger', project: '王五', desc: '在【SKP项目】的迭代次数高于其个人基线70%', time: '1天前' } ],
-          teamPerformance: { designers: [ { id: 'd1', name: '张三', we: 12.5, process: 3.2, avgIter: 2.1 }, { id: 'd2', name: '王五', we: 8.0, process: 2.5, avgIter: 5.8 } ], copywriters: [ { id: 'c1', name: '李四', we: 12.1, avgIter: 3.5 } ], pmae: [ { id: 'p1', name: '赵六', commWE: 9.8, flowWE: 1.2 } ] },
-          projectRisk: [ { id: 'p1', name: 'SKP项目', score: 45, risk: '迭代次数过高', color: 'text-red-500' }, { id: 'p2', name: '越城天地', score: 68, risk: '定稿周期长', color: 'text-yellow-500' }, { id: 'p3', name: '金陵中环', score: 92, risk: '-', color: 'text-green-600' } ]
-        };
-
-        // ===================================================================
-        // 等待DOM加载完毕后执行
-        // ===================================================================
-        document.addEventListener('DOMContentLoaded', () => {
-            renderAllComponents();
-            setupTabs();
-        });
-
-        // ===================================================================
-        // 组件渲染函数
-        // ===================================================================
-        function renderAllComponents() {
-            // 渲染 KPI 卡片
-            const kpiContainer = document.getElementById('kpi-cards-container');
-            const kpiData = mockData.kpi;
-            kpiContainer.innerHTML = `
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    ${createKpiCard(
-                        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-indigo-500"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>', 
-                        "团队负荷状态", 
-                        '<span class="text-red-500">${kpiData.load.high}</span><span class="text-slate-300">/</span><span class="text-yellow-500">${kpiData.load.mid}</span><span class="text-slate-300">/</span><span class="text-green-500">${kpiData.load.low}</span>',
-                        "高 / 中 / 低"
-                    )}
-                    ${createKpiCard(
-                        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-green-500"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>',
-                        "项目健康度",
-                        '<span class="text-green-500">${kpiData.projectHealth.healthy}</span><span class="text-slate-300">/</span><span class="text-yellow-500">${kpiData.projectHealth.warning}</span><span class="text-slate-300">/</span><span class="text-red-500">${kpiData.projectHealth.risk}</span>',
-                        "健康 / 预警 / 风险"
-                    )}
-                    ${createKpiCard(
-                        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-yellow-500"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
-                        "待处理风险",
-                        kpiData.riskCount,
-                        "个高优先级事项"
-                    )}
-                     ${createKpiCard(
-                        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-blue-500"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-                        "平均定稿周期",
-                        '${kpiData.avgFinalHours} <span class="text-xl">小时</span>',
-                        '比上周 <span class="text-green-500">${kpiData.avgFinalHoursChange}%</span>'
-                    )}
-                </div>
-            `;
-
-            // 渲染风险流
-            const riskContainer = document.getElementById('risk-feed-container');
-            riskContainer.innerHTML = `
-                <div class="bg-white p-6 rounded-xl shadow-sm h-96 flex flex-col">
-                    <h3 class="text-lg font-semibold text-slate-800 mb-4 flex-shrink-0">实时风险流</h3>
-                    <div class="space-y-5 overflow-y-auto flex-grow pr-2 -mr-2">
-                        ${mockData.riskFeed.map(item => `
-                            <div class="flex items-start">
-                                <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mr-4 bg-opacity-10 ${item.type === 'danger' ? 'bg-red-100' : 'bg-yellow-100'}">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5 ${item.type === 'danger' ? 'text-red-500' : 'text-yellow-500'}"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-slate-700 leading-tight">【${item.project}】${item.desc}</p>
-                                    <p class="text-xs text-slate-400 mt-1">${item.time}</p>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-
-            // 渲染项目风险榜
-            const projectRiskContainer = document.getElementById('project-risk-container');
-            projectRiskContainer.innerHTML = `
-                 <div class="bg-white p-6 rounded-xl shadow-sm h-full flex flex-col">
-                    <h3 class="text-lg font-semibold text-slate-800 mb-4 flex-shrink-0">项目风险榜</h3>
-                    <div class="relative overflow-auto flex-grow">
-                      <table class="w-full text-sm text-left text-slate-500">
-                        <thead class="text-xs text-slate-700 uppercase bg-slate-50 sticky top-0">
-                          <tr>
-                            <th scope="col" class="px-6 py-3">项目</th>
-                            <th scope="col" class="px-6 py-3 text-center">健康分</th>
-                            <th scope="col" class="px-6 py-3">主要风险</th>
-                          </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100">
-                          ${mockData.projectRisk.map(item => `
-                            <tr>
-                              <th scope="row" class="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">${item.name}</th>
-                              <td class="px-6 py-4 text-center font-bold ${item.color}">${item.score}</td>
-                              <td class="px-6 py-4">${item.risk}</td>
-                            </tr>
-                          `).join('')}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-            `;
-            
-            // 渲染团队效能榜
-            renderTeamPerformance();
-            
-            // 渲染主图表
-            renderWorkloadChart();
-        }
-
-        // ===================================================================
-        // 动态渲染函数
-        // ===================================================================
-        
-        function createKpiCard(icon, title, value, subValue) {
-            return `
-                <div class="bg-white p-6 rounded-xl shadow-sm flex items-start justify-between">
-                    <div>
-                        <p class="text-sm font-medium text-slate-500">${title}</p>
-                        <p class="text-3xl font-bold text-slate-800 mt-2">${value}</p>
-                        <p class="text-xs text-slate-400 mt-1">${subValue}</p>
-                    </div>
-                    <div class="p-2 bg-slate-100 rounded-full">${icon}</div>
-                </div>
-            `;
-        }
-        
-        function renderTeamPerformance(activeTab = 'designers') {
-            const container = document.getElementById('team-performance-container');
-            const perfData = mockData.teamPerformance;
-            
-            const columns = {
-              designers: [ { header: '设计师', accessor: 'name'}, { header: '产出WE', accessor: 'we', cell: (value) => `<span class="font-bold">${value}</span>` }, { header: '过程成本WE', accessor: 'process'}, { header: '平均迭代', accessor: 'avgIter' } ],
-              copywriters: [ { header: '文案', accessor: 'name' }, { header: '产出WE', accessor: 'we', cell: (value) => `<span class="font-bold">${value}</span>` }, { header: '平均迭代', accessor: 'avgIter' } ],
-              pmae: [ { header: 'PM/AE', accessor: 'name' }, { header: '沟通WE', accessor: 'commWE', cell: (value) => `<span class="font-bold">${value}</span>` }, { header: '流程WE', accessor: 'flowWE' } ]
-            };
-
-            const tableHtml = (cols, data) => `
-                <table class="w-full text-sm text-left text-slate-500">
-                  <thead class="text-xs text-slate-700 uppercase bg-slate-50">
-                    <tr>${cols.map(c => `<th scope="col" class="px-6 py-3">${c.header}</th>`).join('')}</tr>
-                  </thead>
-                  <tbody class="divide-y divide-slate-100">
-                    ${data.map(row => `
-                        <tr>
-                            ${cols.map(c => `
-                                <td class="px-6 py-4 font-medium text-slate-700">${c.cell ? c.cell(row[c.accessor]) : row[c.accessor]}</td>
-                            `).join('')}
-                        </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-            `;
-
-            container.innerHTML = `
-                <div class="bg-white p-6 rounded-xl shadow-sm h-full flex flex-col">
-                  <div class="flex justify-between items-center mb-1 flex-shrink-0">
-                    <h3 class="text-lg font-semibold text-slate-800">团队效能榜</h3>
-                    <div class="text-sm font-medium text-center text-slate-500 border-b border-slate-200">
-                      <div class="-mb-px flex space-x-4" role="tablist">
-                        <button data-tab="designers" class="perf-tab py-2 px-1 border-b-2 ${activeTab === 'designers' ? 'border-indigo-500 text-indigo-600' : 'border-transparent hover:text-slate-600 hover:border-slate-300'}">设计</button>
-                        <button data-tab="copywriters" class="perf-tab py-2 px-1 border-b-2 ${activeTab === 'copywriters' ? 'border-indigo-500 text-indigo-600' : 'border-transparent hover:text-slate-600 hover:border-slate-300'}">文案</button>
-                        <button data-tab="pmae" class="perf-tab py-2 px-1 border-b-2 ${activeTab === 'pmae' ? 'border-indigo-500 text-indigo-600' : 'border-transparent hover:text-slate-600 hover:border-slate-300'}">PM/AE</button>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="relative overflow-auto flex-grow mt-4">
-                    ${tableHtml(columns[activeTab], perfData[activeTab])}
-                  </div>
-                </div>
-            `;
-        }
-
-        function renderWorkloadChart() {
-            if (typeof Chart === 'undefined') {
-                console.error("Chart.js is not loaded.");
-                return;
-            }
-            const ctx = document.getElementById('workloadChart').getContext('2d');
-            const data = mockData.workloadChart;
-            
-            const chartData = {
-                labels: data.labels,
-                datasets: [
-                    { type: 'line', label: '过程成本WE', data: data.processWE, borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', yAxisID: 'y1', tension: 0.4, fill: true },
-                    { type: 'bar', label: '总计WE', data: data.totalWE, backgroundColor: '#3b82f6', yAxisID: 'y', borderRadius: 4 },
-                ],
-            };
-            
-            const chartOptions = {
-                responsive: true, maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8, color: '#475569' } },
-                    title: { display: true, text: '团队工作量趋势', align: 'start', font: { size: 18, weight: '600' }, color: '#1e293b' },
-                    tooltip: { mode: 'index', intersect: false, backgroundColor: '#fff', titleColor: '#1e293b', bodyColor: '#475569', borderWidth: 1, borderColor: '#e2e8f0', bodyFont: {family: 'Inter'}, titleFont: {family: 'Inter'} }
-                },
-                scales: {
-                    x: { grid: { display: false }, ticks: { font: { size: 12 }, color: '#64748b' } },
-                    y: { type: 'linear', display: true, position: 'left', title: { display: true, text: '总计工作量当量 (WE)', color: '#475569' }, grid: { color: '#e2e8f0' }, ticks: { color: '#64748b'} },
-                    y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: '过程成本 (WE)', color: '#475569' }, grid: { drawOnChartArea: false }, ticks: { color: '#64748b'} }
-                }
-            };
-
-            new Chart(ctx, { type: 'bar', data: chartData, options: chartOptions });
-        }
-
-        // ===================================================================
-        // 事件监听
-        // ===================================================================
-        function setupTabs() {
-            // 使用事件委托来处理tab点击
-            const container = document.getElementById('team-performance-container');
-            container.addEventListener('click', (event) => {
-                if (event.target.matches('.perf-tab')) {
-                    const tabName = event.target.getAttribute('data-tab');
-                    renderTeamPerformance(tabName);
-                }
-            });
-        }
-    </script>
-</body>
-</html>
+export default DashboardPageV2;

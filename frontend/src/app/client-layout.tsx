@@ -31,7 +31,7 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
 
   // 根据当前路径确定选中的菜单项
   const getSelectedKey = () => {
-    if (pathname === '/' || pathname === '/dashboard') return 'dashboard';
+    if (pathname === '/' || pathname.startsWith('/dashboard')) return 'dashboard';
     if (pathname.startsWith('/employees') || pathname.startsWith('/employee/')) return 'employees';
     if (pathname.startsWith('/projects')) return 'projects';
     if (pathname.startsWith('/files')) return 'files';
@@ -65,7 +65,7 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
       </Sider>
       {/* 右侧内容区 */}
       <Layout>
-        <Content style={{ margin: 0, padding: 24, minHeight: 280, background: '#fff' }}>
+        <Content style={{ margin: 0, padding: 24, minHeight: 280, background: '#f0f2f5' }}>
       {children}
         </Content>
       </Layout>
