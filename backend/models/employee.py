@@ -21,6 +21,8 @@ class EmployeeMapping(db.Model):
     role = db.Column(db.String(32), nullable=False, default='内部员工')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 新增：员工与风险事件的关系
+    risk_events = db.relationship('RiskEvent', back_populates='employee', lazy='dynamic', cascade='all, delete-orphan')
     
     def to_dict(self):
         """转换为字典格式，用于API响应"""

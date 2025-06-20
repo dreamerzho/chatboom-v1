@@ -14,6 +14,8 @@ from models.project import Project, ProjectChatroom
 from models.file import FileRecord, FileVersion
 from models.chat import ChatMessage
 from models.keyword import KeywordCategory
+from models.workload import WorkloadRecord, WorkloadWeights
+from file_validator import FileNameValidator
 
 # 导入chatlog集成模块
 from chatlog_integration import ChatlogIntegration
@@ -116,7 +118,7 @@ class DataManager:
                         }
                         
                         # 使用新的处理器解析聊天记录
-                        processed_result = self.chatlog_processor.process_chatlog(
+                        processed_result = self.chatlog_processor.process_and_deduplicate(
                             chatlog, 
                             employees, 
                             group_info
@@ -256,9 +258,11 @@ class DataManager:
         return [emp.to_dict() for emp in employees]
     
     def _save_sync_results(self, project: Project, sync_result: Dict[str, Any]):
-        """保存同步结果到数据库"""
+        """保存同步结果到数据库，并自动生成工作量明细记录（WorkloadRecord）"""
         try:
-            # 保存文件记录
+            # 初始化文件名验证器
+            file_name_validator = FileNameValidator()
+            # 保存文件记录，并自动生成工作量明细记录
             for file_data in sync_result.get('file_records', []):
                 file_record = FileRecord(
                     original_name=file_data.get('original_name', ''),
@@ -274,9 +278,60 @@ class DataManager:
                     file_size=file_data.get('file_size', 0),
                     status=file_data.get('status', 'pending'),
                     chatroom_name=file_data.get('chatroom_name', ''),
-                    message_seq=file_data.get('message_seq', '')
+                    message_seq=file_data.get('message_seq', ''),
+                    employee_id=file_data.get('employee_id')
                 )
                 db.session.add(file_record)
+
+                # ========== 自动生成工作量明细记录 ========== #
+                # 1. 解析文件名，获取产出类型、业务单位、数量等
+                filename = file_data.get('original_name', '')
+                validate_result = file_name_validator.validate_filename(filename)
+                parsed_info = validate_result.get('parsed_info', {}) if validate_result.get('is_compliant') else {}
+                # 2. 获取员工岗位
+                employee_id = file_data.get('employee_id')
+                employee = EmployeeMapping.query.get(employee_id) if employee_id else None
+                role = employee.role if employee else '未知'
+                # 3. 推断产出类型
+                output_type = '最终版-' + parsed_info.get('extension', '') if parsed_info else '其他'
+                # 4. 业务单位与数量
+                business_unit = None
+                quantity = 1.0
+                workload_str = parsed_info.get('workload') if parsed_info else None
+                if workload_str:
+                    # 简单提取单位和数量
+                    import re
+                    m = re.match(r'^(\d+)([a-zA-Z\u4e00-\u9fa5]*)$', workload_str)
+                    if m:
+                        quantity = float(m.group(1))
+                        business_unit = m.group(2) or None
+                # 5. 是否为最终版
+                is_final = True if '最终' in output_type or 'final' in output_type.lower() else False
+                # 6. 计算WE值（查找权重表）
+                we_value = 0.0
+                if role != '未知' and output_type != '其他' and business_unit:
+                    weight = WorkloadWeights.query.filter_by(role=role, output_type=output_type, business_unit=business_unit, is_final=is_final, is_active=True).first()
+                    if weight:
+                        we_value = weight.we_per_unit * quantity
+                # 7. 生成WorkloadRecord
+                workload_record = WorkloadRecord(
+                    employee_id=employee_id or None,
+                    project_id=project.id,
+                    date=file_record.upload_time.date() if file_record.upload_time else datetime.utcnow().date(),
+                    role=role,
+                    output_type=output_type,
+                    output_value=file_record.id,  # 产出内容标识，存文件ID
+                    we_value=we_value,
+                    is_final=is_final,
+                    is_iteration=False,  # 默认非迭代
+                    iteration_count=0,
+                    related_file_id=file_record.id,
+                    related_message_id=file_data.get('message_seq'),
+                    business_unit=business_unit,
+                    quantity=quantity,
+                    created_at=datetime.utcnow()
+                )
+                db.session.add(workload_record)
             
             # 保存聊天消息
             for message_data in sync_result.get('chat_messages', []):

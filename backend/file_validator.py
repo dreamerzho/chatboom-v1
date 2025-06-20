@@ -138,7 +138,7 @@ class FileNameValidator:
         # 验证工作量
         if not self._is_valid_workload(workload):
             errors.append(f"工作量 '{workload}' 格式不正确")
-            suggestions.append("格式应为: 数字+h (如: 8h, 12h)")
+            suggestions.append("格式应为: 数字+单位（P/p/份/稿/张，大小写均可），或纯数字")
         
         # 验证作者缩写
         if not self._is_valid_author_abbreviation(author):
@@ -148,7 +148,7 @@ class FileNameValidator:
         # 验证版本号
         if not self._is_valid_version(version):
             errors.append(f"版本号 '{version}' 格式不正确")
-            suggestions.append("格式应为: v数字.数字 (如: v1.0, v2.1)")
+            suggestions.append("格式应为: v1, V1, v1.0, V1.0, v2, V2, v2.1, V3 等")
         
         # 验证文件扩展名
         if extension.lower() not in self.supported_extensions:
@@ -202,8 +202,8 @@ class FileNameValidator:
             workload: 工作量字符串
         返回: 是否为有效格式
         """
-        # 格式: 数字+h (如: 8h, 12h, 0.5h)
-        pattern = r'^\d+(\.\d+)?h$'
+        # 支持: 数字+单位（P/p/份/稿/张，大小写均可），或纯数字
+        pattern = r'^(\d+)(([pP]|[fF][eE][nN]|[gG][aA][oO]|[zZ][hH][aA][nN][gG]|[份稿张]))?$'
         return bool(re.match(pattern, workload))
     
     def _is_valid_author_abbreviation(self, author: str) -> bool:
@@ -224,8 +224,8 @@ class FileNameValidator:
             version: 版本号
         返回: 是否为有效格式
         """
-        # 格式: v数字.数字 (如: v1.0, v2.1)
-        pattern = r'^v\d+(\.\d+)*$'
+        # 支持: v1, V1, v1.0, V1.0, v2, V2, v2.1, V3 等
+        pattern = r'^[vV]\d+(\.\d+)?$'
         return bool(re.match(pattern, version))
     
     def _parse_date_code(self, date_code: str) -> Optional[datetime]:

@@ -8,6 +8,7 @@ from .dashboard import dashboard_bp
 from .chatlog import chatlog_bp
 from .sync import sync_bp
 from .keywords import keywords_bp
+from .unmatched import unmatched_bp
 
 __all__ = [
     'employees_bp',
@@ -16,5 +17,6 @@ __all__ = [
     'dashboard_bp',
     'chatlog_bp',
     'sync_bp',
-    'keywords_bp'
+    'keywords_bp',
+    'unmatched_bp'
 ] 

@@ -45,6 +45,7 @@ interface FileRecord {
   uploader: string;
   file_size: string;
   status: string;
+  duration_hours?: number;
 }
 
 // 文件统计接口定义
@@ -72,6 +73,8 @@ function FilesPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [form] = Form.useForm();
+  const [errorModalVisible, setErrorModalVisible] = useState(false);
+  const [errorDetail, setErrorDetail] = useState<string>('');
 
   // 表格列定义
   const columns = [
@@ -87,16 +90,33 @@ function FilesPage() {
       title: '项目',
       dataIndex: 'project_name',
       key: 'project_name',
+      render: (text: string) => (
+        text === '未知项目' ? <span style={{ color: '#faad14', fontWeight: 'bold' }}>{text}</span> : text
+      ),
     },
     {
       title: '工单',
       dataIndex: 'work_order',
       key: 'work_order',
+      render: (text: string) => (
+        <span style={{ color: '#d4380d', fontWeight: 'bold' }}>{text}</span>
+      ),
+    },
+    {
+      title: '工时',
+      dataIndex: 'duration_hours',
+      key: 'duration_hours',
+      render: (value: number | null | undefined) => (
+        value !== null && value !== undefined ? <span style={{ color: '#fa8c16', fontWeight: 'bold' }}>{value.toFixed(2)} 小时</span> : <span style={{ color: '#aaa' }}>-</span>
+      ),
     },
     {
       title: '工作量',
       dataIndex: 'workload',
       key: 'workload',
+      render: (text: string) => (
+        <span style={{ color: '#531dab', fontWeight: 'bold' }}>{text}</span>
+      ),
     },
     {
       title: '作者',
@@ -118,18 +138,39 @@ function FilesPage() {
       title: '版本',
       dataIndex: 'version',
       key: 'version',
+      render: (text: string) => (
+        <span style={{ color: '#0050b3', fontWeight: 'bold' }}>{text}</span>
+      ),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => {
+      render: (status: string, record: FileRecord) => {
         const color = status === 'compliant' ? '#52c41a' : '#ff4d4f';
         const text = status === 'compliant' ? '合规' : '不合规';
+        if (status === 'non_compliant') {
+          return (
+            <span
+              style={{ color, fontWeight: 'bold', cursor: 'pointer', textDecoration: 'underline' }}
+              onClick={() => {
+                const error = (record as FileRecord & { error?: string }).error || '';
+                const suggestion = (record as FileRecord & { suggestion?: string }).suggestion || '';
+                let detail = '';
+                if (error) detail += error + '\n';
+                if (suggestion) detail += suggestion;
+                if (!detail) detail = '文件名不符合规范，具体原因请联系管理员。';
+                setErrorDetail(detail);
+                setErrorModalVisible(true);
+              }}
+              title="点击查看不合规原因"
+            >
+              {text}
+            </span>
+          );
+        }
         return (
-          <span style={{ color, fontWeight: 'bold' }}>
-            {text}
-          </span>
+          <span style={{ color, fontWeight: 'bold' }}>{text}</span>
         );
       },
     },
@@ -156,9 +197,8 @@ function FilesPage() {
     try {
       setLoading(true);
       const response = await fileAPI.getFiles();
-      
       if (response.success) {
-        setFiles(response.data || []);
+        setFiles(Array.isArray(response.data) ? response.data : []);
       } else {
         message.error('获取文件列表失败');
       }
@@ -421,6 +461,21 @@ function FilesPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* 不合规原因弹窗 */}
+      <Modal
+        title="文件不合规原因"
+        open={errorModalVisible}
+        onCancel={() => setErrorModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setErrorModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={600}
+      >
+        <pre style={{ whiteSpace: 'pre-wrap', color: '#ff4d4f', fontSize: 16 }}>{errorDetail}</pre>
       </Modal>
     </div>
   );

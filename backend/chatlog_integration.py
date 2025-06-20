@@ -378,7 +378,12 @@ class ChatlogIntegration:
                     
                     if chatlog:
                         # 使用处理器解析聊天记录
-                        processed_result = self.processor.process_chatlog(chatlog, employees)
+                        group_info = {
+                            'chatroom_name': chatroom_name,
+                            'project_name': project_name,
+                            'group_type': 'unknown'  # 这里可根据实际业务补充类型
+                        }
+                        processed_result = self.processor.process_and_deduplicate(chatlog, employees, group_info)
                         
                         # 更新统计信息
                         sync_results["success_count"] += 1

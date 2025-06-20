@@ -34,6 +34,7 @@ class FileRecord(db.Model):
     archive_path = db.Column(db.String(256))  # 归档路径
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    duration_hours = db.Column(db.Float, nullable=True)  # 工时（小时），同一任务多版本时间差
     
     # 关联字段
     employee_id = db.Column(db.Integer, db.ForeignKey('employee_mappings.id'))  # 关联员工
@@ -67,7 +68,8 @@ class FileRecord(db.Model):
             'chatroom_name': self.chatroom_name,
             'message_seq': self.message_seq,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'duration_hours': self.duration_hours
         }
 
 class FileVersion(db.Model):

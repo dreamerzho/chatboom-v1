@@ -1,5 +1,5 @@
 # 数据模型包
-# 包含所有数据库模型定义，按功能模块拆分
+# 只导入基础模型，避免新表模型（如 risk_event、project_health、workload）引起 MetaData 冲突
 
 from .employee import EmployeeMapping
 from .project import Project, ProjectChatroom

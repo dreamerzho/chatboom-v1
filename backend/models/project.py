@@ -47,6 +47,9 @@ class Project(db.Model):
     # 通过 ProjectChatroom 关联表实现，支持一个项目关联多个群聊
     chatrooms = db.relationship('ProjectChatroom', backref='project', lazy='dynamic', cascade='all, delete-orphan')
     
+    # 新增：项目与风险事件的关系
+    risk_events = db.relationship('RiskEvent', back_populates='project', lazy='dynamic', cascade='all, delete-orphan')
+    
     def to_dict(self):
         """转换为字典格式，用于API响应"""
         # 获取项目关联的群聊列表

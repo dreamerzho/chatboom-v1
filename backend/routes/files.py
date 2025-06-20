@@ -72,7 +72,7 @@ def get_files():
         return jsonify({
             'success': True,
             'data': {
-                'files': files_list,
+                'items': files_list,
                 'pagination': {
                     'page': page,
                     'per_page': per_page,

@@ -7,6 +7,9 @@ import logging
 from sqlalchemy import func, and_
 from db import db
 from models import Project, ProjectChatroom, ChatMessage, FileRecord, EmployeeMapping
+from models.workload import WorkloadRecord
+from models.project_health import ProjectHealthStats
+from models.risk_event import RiskEvent
 
 # 创建蓝图
 projects_bp = Blueprint('projects', __name__, url_prefix='/api/v1/projects')
@@ -447,4 +450,66 @@ def get_project_stats(project_id):
         })
     except Exception as e:
         logger.error(f"获取项目统计失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500 
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@projects_bp.route('/<int:project_id>/workloads', methods=['GET'])
+def get_project_workloads(project_id):
+    """
+    获取某项目在指定时间段内的工作量明细，支持分页
+    """
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 20))
+
+    query = WorkloadRecord.query.filter_by(project_id=project_id)
+    
+    total = query.count()
+    records = query.order_by(WorkloadRecord.date.desc()).offset((page-1)*size).limit(size).all()
+    
+    return jsonify({
+        'total': total,
+        'page': page,
+        'size': size,
+        'data': [r.to_dict() for r in records]
+    })
+
+@projects_bp.route('/<int:project_id>/health-stats', methods=['GET'])
+def get_project_health_stats(project_id):
+    """
+    获取某项目的健康度统计历史
+    """
+    period = request.args.get('period', '30d')
+    days = int(period.replace('d',''))
+    since = datetime.now() - timedelta(days=days)
+
+    stats = ProjectHealthStats.query.filter(
+        ProjectHealthStats.project_id == project_id,
+        ProjectHealthStats.created_at >= since
+    ).order_by(ProjectHealthStats.created_at.desc()).all()
+    
+    return jsonify([s.to_dict() for s in stats])
+
+@projects_bp.route('/<int:project_id>/risk-events', methods=['GET'])
+def get_project_risk_events(project_id):
+    """
+    获取某项目相关的风险事件，支持分页和时间段筛选
+    """
+    period = request.args.get('period', '30d')
+    days = int(period.replace('d',''))
+    since = datetime.now() - timedelta(days=days)
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 20))
+
+    query = RiskEvent.query.filter(
+        RiskEvent.project_id == project_id,
+        RiskEvent.event_time >= since
+    )
+    
+    total = query.count()
+    events = query.order_by(RiskEvent.event_time.desc()).offset((page-1)*size).limit(size).all()
+    
+    return jsonify({
+        'total': total,
+        'page': page,
+        'size': size,
+        'data': [e.to_dict() for e in events]
+    }) 

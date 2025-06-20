@@ -205,8 +205,12 @@ def test_chat_parser():
         
         # 模拟聊天记录
         chatlog = [file_message]
-        
-        result = processor.process_chatlog(chatlog, employees)
+        group_info = {
+            'chatroom_name': '越城天地&巨象微信工作群',
+            'project_name': '越城天地',
+            'group_type': 'internal'
+        }
+        result = processor.process_and_deduplicate(chatlog, employees, group_info)
         print(f"\n聊天记录处理结果:")
         print(f"  总消息数: {result['total_messages']}")
         print(f"  处理消息数: {result['processed_messages']}")

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>监测系统 V4 - 员工视图原型</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.css" rel="stylesheet" />
+    <style>
+        :root { --main-bg: #f8f9fa; --card-bg: white; --text-primary: #212529; --text-secondary: #6c757d; --accent-color: #0d6efd; }
+        body { background-color: var(--main-bg); font-family: 'Inter', 'Helvetica Neue', 'Arial', sans-serif; }
+        .main-content { padding: 24px; }
+        .card { background-color: var(--card-bg); border-radius: 12px; border: 1px solid #dee2e6; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; padding: 24px; }
+        .nav-link.active { background-color: var(--accent-color); color: white; }
+        .nav-link.active svg { color: white; }
+        .nav-link { transition: all 0.2s ease; }
+        .kpi-card h3 { font-size: 1rem; color: var(--text-secondary); margin-bottom: 8px; font-weight: 500;}
+        .kpi-card .value { font-size: 2.25rem; font-weight: 700; color: var(--text-primary); }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div class="flex h-screen">
+        <!-- Sidebar Navigation -->
+        <div class="w-64 bg-white shadow-lg flex flex-col flex-shrink-0">
+            <div class="p-5 text-2xl font-bold text-gray-800 border-b-2 border-gray-100">
+                服务监测系统
+            </div>
+            <nav id="sidebar-nav" class="flex-1 px-4 py-4 space-y-2">
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span class="ml-4 font-medium">数据概览</span>
+                </a>
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 rounded-lg active">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                    <span class="ml-4 font-medium">员工视图</span>
+                </a>
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                    <span class="ml-4 font-medium">项目视图</span>
+                </a>
+                 <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    <span class="ml-4 font-medium">文件视图</span>
+                </a>
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.096 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    <span class="ml-4 font-medium">系统设置</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 overflow-y-auto">
+            <div id="employee-view" class="page active">
+                <div class="px-6 py-4 bg-white border-b flex justify-between items-center sticky top-0 z-10">
+                    <h1 class="text-2xl font-semibold text-gray-800">员工视图</h1>
+                    <div class="flex items-center space-x-4">
+                         <div class="relative">
+                            <input type="search" placeholder="搜索员工..." class="w-64 pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                             </div>
+                        </div>
+                        <button class="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center space-x-2">
+                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                             <span>添加员工</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="main-content">
+                    <!-- KPI Cards for Employee View -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                        <div class="card kpi-card"><h3>员工总数</h3><div class="value">87</div></div>
+                        <div class="card kpi-card"><h3>高负荷员工</h3><div class="value text-red-500">3</div></div>
+                        <div class="card kpi-card"><h3>核心贡献者(Top 20%)</h3><div class="value text-green-500">17</div></div>
+                        <div class="card kpi-card"><h3>待分配人员</h3><div class="value text-yellow-500">12</div></div>
+                    </div>
+
+                    <!-- Main Employee Table -->
+                    <div class="card">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left text-gray-500">
+                                <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3">员工</th>
+                                        <th class="px-6 py-3">岗位</th>
+                                        <th class="px-6 py-3">总负荷指数</th>
+                                        <th class="px-6 py-3">产出/沟通 WE</th>
+                                        <th class="px-6 py-3">过程/流程成本 WE</th>
+                                        <th class="px-6 py-3">平均迭代</th>
+                                        <th class="px-6 py-3">项目饱和度</th>
+                                        <th class="px-6 py-3">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="bg-white border-b hover:bg-gray-50">
+                                        <td class="px-6 py-4 font-medium text-gray-900 flex items-center">
+                                            <img class="w-8 h-8 rounded-full mr-3" src="https://i.pravatar.cc/150?u=a042581f4e29026704d" alt="avatar">
+                                            张三
+                                        </td>
+                                        <td>设计</td>
+                                        <td class="px-6 py-4 font-semibold text-lg text-green-600">15.7</td>
+                                        <td class="px-6 py-4">12.5</td>
+                                        <td class="px-6 py-4 text-yellow-600">3.2</td>
+                                        <td class="px-6 py-4">2.1</td>
+                                        <td class="px-6 py-4">3</td>
+                                        <td class="px-6 py-4"><a href="#" class="font-medium text-blue-600 hover:underline">详情</a></td>
+                                    </tr>
+                                    <tr class="bg-white border-b hover:bg-gray-50">
+                                       <td class="px-6 py-4 font-medium text-gray-900 flex items-center">
+                                            <img class="w-8 h-8 rounded-full mr-3" src="https://i.pravatar.cc/150?u=a042581f4e29026704e" alt="avatar">
+                                            李四
+                                        </td>
+                                        <td>文案</td>
+                                        <td class="px-6 py-4 font-semibold text-lg">12.1</td>
+                                        <td class="px-6 py-4">12.1</td>
+                                        <td class="px-6 py-4">-</td>
+                                        <td class="px-6 py-4">3.5</td>
+                                        <td class="px-6 py-4">2</td>
+                                        <td class="px-6 py-4"><a href="#" class="font-medium text-blue-600 hover:underline">详情</a></td>
+                                    </tr>
+                                    <tr class="bg-red-50 border-b hover:bg-red-100">
+                                        <td class="px-6 py-4 font-medium text-gray-900 flex items-center">
+                                            <img class="w-8 h-8 rounded-full mr-3" src="https://i.pravatar.cc/150?u=a042581f4e29026704f" alt="avatar">
+                                            王五
+                                        </td>
+                                        <td>设计</td>
+                                        <td class="px-6 py-4 font-semibold text-lg text-red-600">10.5</td>
+                                        <td class="px-6 py-4">8.0</td>
+                                        <td class="px-6 py-4 font-bold text-red-600">2.5</td>
+                                        <td class="px-6 py-4 font-bold text-red-600">5.8</td>
+                                        <td class="px-6 py-4 font-bold text-red-600">4</td>
+                                        <td class="px-6 py-4"><a href="#" class="font-medium text-blue-600 hover:underline">详情</a></td>
+                                    </tr>
+                                     <tr class="bg-white border-b hover:bg-gray-50">
+                                       <td class="px-6 py-4 font-medium text-gray-900 flex items-center">
+                                            <img class="w-8 h-8 rounded-full mr-3" src="https://i.pravatar.cc/150?u=a042581f4e29026704a" alt="avatar">
+                                            赵六
+                                        </td>
+                                        <td>PM</td>
+                                        <td class="px-6 py-4 font-semibold text-lg">11.0</td>
+                                        <td class="px-6 py-4">9.8</td>
+                                        <td class="px-6 py-4">1.2</td>
+                                        <td class="px-6 py-4">-</td>
+                                        <td class="px-6 py-4">3</td>
+                                        <td class="px-6 py-4"><a href="#" class="font-medium text-blue-600 hover:underline">详情</a></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Unmatched Persons Table -->
+                    <div class="card mt-6">
+                        <h3 class="font-semibold text-lg mb-4 text-gray-800">待分配人员 (自动匹配)</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left text-gray-500">
+                                <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3">微信昵称</th>
+                                        <th class="px-6 py-3">出现群聊</th>
+                                        <th class="px-6 py-3">推荐角色</th>
+                                        <th class="px-6 py-3">备注</th>
+                                        <th class="px-6 py-3">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="bg-white border-b hover:bg-gray-50">
+                                        <td class="px-6 py-4 font-medium text-gray-900">叮叮咚咚</td>
+                                        <td class="px-6 py-4">【外部】SKP项目</td>
+                                        <td class="px-6 py-4">
+                                            <span class="bg-blue-100 text-blue-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded">客户</span>
+                                        </td>
+                                        <td class="px-6 py-4 text-gray-500">系统根据发言内容推荐</td>
+                                        <td class="px-6 py-4"><button class="font-medium text-blue-600 hover:underline">分配角色</button></td>
+                                    </tr>
+                                    <tr class="bg-white border-b hover:bg-gray-50">
+                                        <td class="px-6 py-4 font-medium text-gray-900">财务-Linda</td>
+                                        <td class="px-6 py-4">【内部】公司行政群</td>
+                                        <td class="px-6 py-4">
+                                            <span class="bg-green-100 text-green-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded">行政</span>
+                                        </td>
+                                        <td class="px-6 py-4 text-gray-500">-</td>
+                                        <td class="px-6 py-4"><button class="font-medium text-blue-600 hover:underline">分配角色</button></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Other pages will be added here -->
+        </main>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // This script can be expanded for full interactivity (e.g., opening modals)
+    console.log("员工视图原型加载成功！");
+});
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
+</body>
+</html>

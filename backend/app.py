@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 def create_app():
     app = Flask(__name__)
-    CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
+    # 允许前端跨域访问，支持cookie，安全指定来源
+    CORS(app, origins=["http://192.168.50.45:3000", "http://localhost:3000"], supports_credentials=True)
     app.config.from_object(Config)  # 直接传Config类对象
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db.init_app(app) # 初始化 db
@@ -29,6 +30,7 @@ def create_app():
 
     # 导入API路由蓝图
     from routes import employees_bp, projects_bp, files_bp, dashboard_bp, chatlog_bp, sync_bp, keywords_bp
+    from routes.unmatched import unmatched_bp
     app.register_blueprint(employees_bp)
     app.register_blueprint(projects_bp)
     app.register_blueprint(files_bp)
@@ -36,6 +38,7 @@ def create_app():
     app.register_blueprint(chatlog_bp)
     app.register_blueprint(sync_bp)
     app.register_blueprint(keywords_bp)
+    app.register_blueprint(unmatched_bp)
 
     @app.route('/', methods=['GET'])
     def index():
@@ -199,6 +202,20 @@ def create_app():
         except Exception as e:
             logger.error(f"文件上传验证失败: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
+
+    # --- 全局OPTIONS兜底路由，防止预检404 ---
+    @app.route('/<path:path>', methods=['OPTIONS'])
+    def options_handler(path):
+        """
+        兜底处理所有未命中的OPTIONS预检请求，返回200和CORS头，防止CORS预检404
+        """
+        response = jsonify({'msg': 'CORS preflight OK'})
+        response.status_code = 200
+        response.headers.add('Access-Control-Allow-Origin', 'http://192.168.50.45:3000')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+        return response
 
     return app
 

@@ -155,6 +155,17 @@ interface SyncResponse {
   log: string[];
 }
 
+// 未匹配人员接口
+type UnmatchedPerson = {
+  id: number;
+  sender_name: string;
+  group_name: string;
+  role: string;
+  remark: string;
+  created_at: string;
+  updated_at: string;
+};
+
 // 通用API请求函数
 async function apiRequest<T>(
   endpoint: string,
@@ -191,7 +202,18 @@ async function apiRequest<T>(
 // 员工管理API
 export const employeeAPI = {
   // 获取员工列表
-  getEmployees: () => apiRequest<EmployeeMapping[]>('/api/v1/employees/'),
+  getEmployees: async () => {
+    const res = await apiRequest<{ items: EmployeeMapping[] }>('/api/v1/employees/');
+    // 兼容后端分页结构，始终返回items数组
+    if (res.success && res.data && Array.isArray(res.data.items)) {
+      return { ...res, data: res.data.items };
+    } else if (res.success && Array.isArray(res.data)) {
+      // 兼容老结构
+      return { ...res, data: res.data };
+    } else {
+      return { ...res, data: [] };
+    }
+  },
 
   // 添加员工
   addEmployee: (employee: {
@@ -251,7 +273,16 @@ export const projectAPI = {
 // 文件管理API
 export const fileAPI = {
   // 获取文件列表
-  getFiles: () => apiRequest<FileRecord[]>('/api/v1/files/'),
+  getFiles: async () => {
+    const res = await apiRequest<{ items: FileRecord[] }>('/api/v1/files/');
+    if (res.success && res.data && Array.isArray(res.data.items)) {
+      return { ...res, data: res.data.items };
+    } else if (res.success && Array.isArray(res.data)) {
+      return { ...res, data: res.data };
+    } else {
+      return { ...res, data: [] };
+    }
+  },
 
   // 获取文件统计
   getFileStats: () => apiRequest<FileStats>('/api/v1/files/stats'),
@@ -374,5 +405,26 @@ export const chatlogAPI = {
   syncChatlogs: () =>
     apiRequest('/api/v1/chatlog/sync', {
       method: 'POST',
+    }),
+};
+
+// 未匹配人员API
+export const unmatchedAPI = {
+  // 获取未匹配人员列表
+  getUnmatchedPersons: async () => {
+    const res = await apiRequest<{ data: UnmatchedPerson[] }>('/api/v1/unmatched/');
+    if (res.success && res.data && Array.isArray(res.data)) {
+      return { ...res, data: res.data };
+    } else if (res.success && res.data && Array.isArray(res.data.data)) {
+      return { ...res, data: res.data.data };
+    } else {
+      return { ...res, data: [] };
+    }
+  },
+  // 修改未匹配人员角色/备注
+  updateUnmatchedPerson: (id: number, data: Partial<UnmatchedPerson>) =>
+    apiRequest(`/api/v1/unmatched/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     }),
 };

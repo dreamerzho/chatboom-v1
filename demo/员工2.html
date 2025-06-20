@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>监测系统 V4 - 员工视图原型</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.css" rel="stylesheet" />
+    <style>
+        :root { --main-bg: #f8f9fa; --card-bg: white; --text-primary: #212529; --text-secondary: #6c757d; --accent-color: #0d6efd; }
+        body { background-color: var(--main-bg); font-family: 'Inter', 'Helvetica Neue', 'Arial', sans-serif; }
+        .main-content { padding: 24px; }
+        .card { background-color: var(--card-bg); border-radius: 12px; border: 1px solid #dee2e6; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; padding: 24px; }
+        .nav-link.active { background-color: var(--accent-color); color: white; }
+        .nav-link.active svg { color: white; }
+        .nav-link { transition: all 0.2s ease; }
+        .kpi-card { cursor: pointer; }
+        .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(0,0,0,0.07); }
+        .kpi-card h3 { font-size: 1rem; color: var(--text-secondary); margin-bottom: 8px; font-weight: 500;}
+        .kpi-card .value { font-size: 2.25rem; font-weight: 700; color: var(--text-primary); }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div class="flex h-screen">
+        <!-- Sidebar Navigation -->
+        <div class="w-64 bg-white shadow-lg flex flex-col flex-shrink-0">
+            <div class="p-5 text-2xl font-bold text-gray-800 border-b-2 border-gray-100">
+                服务监测系统
+            </div>
+            <nav id="sidebar-nav" class="flex-1 px-4 py-4 space-y-2">
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span class="ml-4 font-medium">数据概览</span>
+                </a>
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 rounded-lg active">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                    <span class="ml-4 font-medium">员工视图</span>
+                </a>
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                    <span class="ml-4 font-medium">项目视图</span>
+                </a>
+                 <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    <span class="ml-4 font-medium">文件视图</span>
+                </a>
+                <a href="#" class="nav-link flex items-center px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.096 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    <span class="ml-4 font-medium">系统设置</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 overflow-y-auto">
+            <div id="employee-view" class="page active">
+                <div class="px-6 py-4 bg-white border-b flex justify-between items-center sticky top-0 z-10">
+                    <h1 class="text-2xl font-semibold text-gray-800">员工视图</h1>
+                    <div class="flex items-center space-x-4">
+                         <div class="relative">
+                            <input type="search" placeholder="搜索员工..." class="w-64 pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                             </div>
+                        </div>
+                        <button data-modal-toggle="add-employee-modal" class="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center space-x-2">
+                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                             <span>添加员工</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="main-content">
+                    <!-- KPI Cards for Employee View -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                        <div class="card kpi-card"><h3>员工总数</h3><div class="value">87</div></div>
+                        <div class="card kpi-card"><h3>高负荷员工</h3><div class="value text-red-500">3</div></div>
+                        <div class="card kpi-card"><h3>核心贡献者(Top 20%)</h3><div class="value text-green-500">17</div></div>
+                        <div data-modal-toggle="unmatched-persons-modal" class="card kpi-card hover:bg-yellow-50"><h3>待分配人员</h3><div class="value text-yellow-500">12</div></div>
+                    </div>
+
+                    <!-- Main Employee Table -->
+                    <div class="card">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left text-gray-500">
+                                <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3">员工</th>
+                                        <th class="px-6 py-3">岗位</th>
+                                        <th class="px-6 py-3">总负荷指数</th>
+                                        <th class="px-6 py-3 min-w-64">参与项目</th>
+                                        <th class="px-6 py-3">平均迭代</th>
+                                        <th class="px-6 py-3">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Employee Data Rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- MODALS SECTION -->
+    <!-- Add Employee Modal -->
+    <div id="add-employee-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-modal md:h-full">
+        <div class="relative p-4 w-full max-w-md h-full md:h-auto"><div class="relative bg-white rounded-lg shadow"><div class="flex items-start justify-between p-4 border-b rounded-t"><h3 class="text-xl font-semibold text-gray-900">添加员工</h3><button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm p-1.5 ml-auto inline-flex items-center" data-modal-hide="add-employee-modal"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg></button></div><div class="p-6 space-y-4"><div><label class="block mb-2 text-sm font-medium text-gray-900">* 真实姓名</label><input type="text" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="请输入真实姓名"></div><div><label class="block mb-2 text-sm font-medium text-gray-900">* 微信昵称</label><input type="text" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="请输入微信昵称"></div><div><label class="block mb-2 text-sm font-medium text-gray-900">* 岗位</label><input type="text" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="如: 设计, 文案, PM"></div><div><label class="block mb-2 text-sm font-medium text-gray-900">* 姓名缩写</label><input type="text" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" placeholder="如: ZS, LJG"></div></div><div class="flex items-center p-6 space-x-2 border-t border-gray-200 rounded-b"><button type="button" class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center">确定</button><button data-modal-hide="add-employee-modal" type="button" class="text-gray-500 bg-white hover:bg-gray-100 focus:ring-4 focus:outline-none focus:ring-blue-300 rounded-lg border border-gray-200 text-sm font-medium px-5 py-2.5 hover:text-gray-900 focus:z-10">取消</button></div></div></div>
+    </div>
+    
+    <!-- Unmatched Persons Modal -->
+    <div id="unmatched-persons-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-modal md:h-full">
+        <div class="relative p-4 w-full max-w-4xl h-full md:h-auto"><div class="relative bg-white rounded-lg shadow"><div class="flex items-start justify-between p-4 border-b rounded-t"><h3 class="text-xl font-semibold text-gray-900">待分配人员 (自动匹配)</h3><button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm p-1.5 ml-auto inline-flex items-center" data-modal-hide="unmatched-persons-modal"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg></button></div><div class="p-6"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">微信昵称</th><th class="px-6 py-3">出现群聊</th><th class="px-6 py-3">推荐角色</th><th class="px-6 py-3">备注</th><th class="px-6 py-3">操作</th></tr></thead><tbody><tr class="bg-white border-b hover:bg-gray-50"><td class="px-6 py-4 font-medium text-gray-900">叮叮咚咚</td><td class="px-6 py-4">【外部】SKP项目</td><td><span class="bg-blue-100 text-blue-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded">客户</span></td><td class="px-6 py-4">系统根据发言内容推荐</td><td><button class="font-medium text-blue-600 hover:underline">分配角色</button></td></tr><tr class="bg-white border-b hover:bg-gray-50"><td class="px-6 py-4 font-medium text-gray-900">财务-Linda</td><td class="px-6 py-4">【内部】公司行政群</td><td><span class="bg-green-100 text-green-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded">行政</span></td><td class="px-6 py-4">-</td><td><button class="font-medium text-blue-600 hover:underline">分配角色</button></td></tr></tbody></table></div></div></div>
+    </div>
+
+    <!-- Employee Detail Modal -->
+     <div id="employee-detail-modal" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-modal md:h-full">
+        <div class="relative p-4 w-full max-w-2xl h-full md:h-auto"><div class="relative bg-white rounded-lg shadow"><div class="flex items-start justify-between p-4 border-b rounded-t"><div class="flex items-center"><img id="detail-avatar" class="w-12 h-12 rounded-full mr-4" src="" alt="avatar"><div id="detail-header"><h3 class="text-xl font-semibold text-gray-900"></h3><p class="text-sm text-gray-500"></p></div></div><button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm p-1.5 ml-auto inline-flex items-center" data-modal-hide="employee-detail-modal"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg></button></div><div class="p-6 space-y-6"><div class="grid grid-cols-2 gap-4" id="detail-kpis"></div><div id="detail-projects"></div><div><h4 class="text-sm font-medium text-gray-500 mb-2">负荷指数趋势 (近30天)</h4><div id="employee-load-chart" style="height: 150px;"></div></div></div></div></div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    console.log("员工视图原型加载成功！");
+
+    const employeeData = [
+        { id: 1, name: '张三', avatar: 'a042581f4e29026704d', position: '设计', load: 15.7, projects: ['越城天地', '金陵中环'], revisions: 2.1, isHighLoad: false },
+        { id: 2, name: '王五', avatar: 'a042581f4e29026704f', position: '设计', load: 10.5, projects: ['SKP项目'], revisions: 5.8, isHighLoad: true },
+        { id: 3, name: '李四', avatar: 'a042581f4e29026704e', position: '文案', load: 12.1, projects: ['越城天地', 'SKP项目'], revisions: 3.5, isHighLoad: false },
+        { id: 4, name: '赵六', avatar: 'a042581f4e29026704a', position: 'PM', load: 11.0, projects: ['越城天地', '金陵中环', 'SKP项目'], revisions: '-', isHighLoad: false },
+        { id: 5, name: '孙七', avatar: 'a042581f4e29026704b', position: 'AE', load: 14.2, projects: ['SKP项目', '金陵中环'], revisions: '-', isHighLoad: false },
+        { id: 6, name: '周八', avatar: 'a042581f4e29026704c', position: '设计', load: 9.8, projects: ['金陵中环'], revisions: 1.8, isHighLoad: false },
+        { id: 7, name: '吴九', avatar: 'a042581f4e290267041', position: '文案', load: 13.5, projects: ['SKP项目', '越城天地'], revisions: 2.9, isHighLoad: false },
+        { id: 8, name: '郑十', avatar: 'a042581f4e290267042', position: '设计', load: 18.1, projects: ['SKP项目', '金陵中环', '越城天地'], revisions: 3.1, isHighLoad: true },
+        { id: 9, name: '陈十一', avatar: 'a042581f4e290267043', position: 'PM', load: 10.1, projects: ['金陵中环', 'SKP项目'], revisions: '-', isHighLoad: false },
+        { id: 10, name: '卫十二', avatar: 'a042581f4e290267044', position: '设计', load: 7.5, projects: ['越城天地'], revisions: 1.5, isHighLoad: false },
+        { id: 11, name: '蒋十三', avatar: 'a042581f4e290267045', position: '文案', load: 9.9, projects: ['金陵中环'], revisions: 2.2, isHighLoad: false },
+        { id: 12, name: '沈十四', avatar: 'a042581f4e290267046', position: 'AE', load: 16.3, projects: ['越城天地', 'SKP项目', '金陵中环'], revisions: '-', isHighLoad: true },
+        { id: 13, name: '韩十五', avatar: 'a042581f4e290267047', position: '设计', load: 11.8, projects: ['SKP项目'], revisions: 2.8, isHighLoad: false },
+        { id: 14, name: '杨十六', avatar: 'a042581f4e290267048', position: '文案', load: 10.8, projects: ['越城天地'], revisions: 3.3, isHighLoad: false },
+        { id: 15, name: '朱十七', avatar: 'a042581f4e290267049', position: 'PM', load: 12.8, projects: ['金陵中环', 'SKP项目'], revisions: '-', isHighLoad: false }
+    ];
+
+    const projectColors = {
+        '越城天地': 'bg-blue-100 text-blue-800',
+        '金陵中环': 'bg-purple-100 text-purple-800',
+        'SKP项目': 'bg-red-100 text-red-800',
+    };
+
+    const tableBody = document.querySelector('#employee-view table tbody');
+    let tableHTML = '';
+    employeeData.forEach(emp => {
+        const rowClass = emp.isHighLoad ? 'bg-red-50 hover:bg-red-100' : 'bg-white hover:bg-gray-50';
+        const loadClass = emp.isHighLoad ? 'text-red-600' : (emp.load > 12 ? 'text-yellow-600' : 'text-green-600');
+        const revisionClass = emp.revisions > 4 ? 'text-red-600 font-bold' : '';
+
+        const projectTags = emp.projects.map(p => 
+            `<span class="${projectColors[p] || 'bg-gray-100 text-gray-800'} text-xs font-medium me-2 px-2.5 py-0.5 rounded-full">${p}</span>`
+        ).join('');
+
+        tableHTML += `
+            <tr class="${rowClass} border-b" data-employee-id="${emp.id}">
+                <td class="px-6 py-4 font-medium text-gray-900 flex items-center">
+                    <img class="w-8 h-8 rounded-full mr-3" src="https://i.pravatar.cc/150?u=${emp.avatar}" alt="avatar">
+                    ${emp.name}
+                </td>
+                <td>${emp.position}</td>
+                <td class="px-6 py-4 font-semibold text-lg ${loadClass}">${emp.load}</td>
+                <td class="px-6 py-4">${projectTags}</td>
+                <td class="px-6 py-4 ${revisionClass}">${emp.revisions}</td>
+                <td class="px-6 py-4">
+                    <button data-modal-toggle="employee-detail-modal" class="detail-btn font-medium text-blue-600 hover:underline">详情</button>
+                </td>
+            </tr>
+        `;
+    });
+    tableBody.innerHTML = tableHTML;
+
+    // --- MODAL INTERACTIVITY ---
+    const detailModal = document.getElementById('employee-detail-modal');
+    const detailHeader = document.getElementById('detail-header');
+    const detailAvatar = document.getElementById('detail-avatar');
+    const detailKpis = document.getElementById('detail-kpis');
+    const detailProjects = document.getElementById('detail-projects');
+    const detailChartEl = document.querySelector("#employee-load-chart");
+    
+    const detailChartOptions = {
+        series: [],
+        chart: { type: 'area', height: 150, sparkline: { enabled: true }},
+        stroke: { curve: 'smooth', width: 2 },
+        fill: { opacity: 0.3 },
+        yaxis: { min: 0 },
+        tooltip: { fixed: { enabled: false }, x: { show: false }, y: { title: { formatter: () => '负荷: ' } }, marker: { show: false } }
+    };
+    const detailChart = new ApexCharts(detailChartEl, detailChartOptions);
+    detailChart.render();
+    
+    document.querySelectorAll('.detail-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const row = e.target.closest('tr');
+            const empId = parseInt(row.dataset.employeeId);
+            const data = employeeData.find(emp => emp.id === empId);
+
+            // Populate Modal
+            detailAvatar.src = `https://i.pravatar.cc/150?u=${data.avatar}`;
+            detailHeader.querySelector('h3').textContent = `${data.name} (${data.position})`;
+            detailHeader.querySelector('p').textContent = `员工ID: EMP-${String(data.id).padStart(3, '0')}`;
+
+            detailKpis.innerHTML = `
+                <div><h4 class="text-sm font-medium text-gray-500">总负荷指数</h4><p class="text-2xl font-bold ${data.isHighLoad ? 'text-red-500' : 'text-green-500'}">${data.load}</p></div>
+                <div><h4 class="text-sm font-medium text-gray-500">平均迭代次数</h4><p class="text-2xl font-bold ${data.revisions > 4 ? 'text-red-500' : ''}">${data.revisions}</p></div>
+            `;
+            
+            const projectTagsHTML = data.projects.map(p => `<span class="${projectColors[p] || 'bg-gray-100 text-gray-800'} text-sm font-medium px-3 py-1 rounded-full">${p}</span>`).join('');
+            detailProjects.innerHTML = `<h4 class="text-sm font-medium text-gray-500 mb-2">参与项目 (${data.projects.length})</h4><div class="flex flex-wrap gap-2">${projectTagsHTML}</div>`;
+
+            // Update chart
+            detailChart.updateSeries([{
+                name: '负荷指数',
+                data: Array.from({length: 10}, () => (Math.random() * 4 + (data.load - 2)).toFixed(1)) // Mock trend around user's load
+            }]);
+             detailChart.updateOptions({ colors: [data.isHighLoad ? '#ef4444' : '#10b981'] });
+        });
+    });
+
+});
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
+</body>
+</html>

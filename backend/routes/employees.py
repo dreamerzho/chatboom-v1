@@ -11,6 +11,9 @@ from db import db
 # 导入统一数据管理器
 from data_manager import data_manager
 from utils import APIResponse, ValidationHelper, PaginationHelper
+from models.employee import EmployeeMapping
+from models.workload import WorkloadRecord
+from models.risk_event import RiskEvent
 
 # 创建员工管理蓝图
 employees_bp = Blueprint('employees', __name__, url_prefix='/api/v1/employees')
@@ -29,7 +32,6 @@ def get_employees():
     返回: 标准化分页响应，包含员工映射数据列表
     """
     try:
-        from models import EmployeeMapping
         # 获取分页参数
         params = PaginationHelper.get_pagination_params(request)
         page = params['page']
@@ -68,7 +70,6 @@ def create_employee():
     返回: 创建结果，标准化响应格式
     """
     try:
-        from models import EmployeeMapping
         data = request.get_json()
         if not data:
             return APIResponse.validation_error(["缺少请求数据"])
@@ -116,7 +117,6 @@ def update_employee(employee_id):
     返回: 更新结果，标准化响应格式
     """
     try:
-        from models import EmployeeMapping
         data = request.get_json()
         if not data:
             return APIResponse.validation_error(["缺少请求数据"])
@@ -155,7 +155,6 @@ def delete_employee(employee_id):
     返回: 删除结果，标准化响应格式
     """
     try:
-        from models import EmployeeMapping
         employee = EmployeeMapping.query.get(employee_id)
         if not employee:
             return APIResponse.not_found("员工", employee_id)
@@ -166,27 +165,91 @@ def delete_employee(employee_id):
         logger.error(f"删除员工映射失败: {str(e)}")
         return APIResponse.database_error(str(e))
 
+@employees_bp.route('/<int:employee_id>/workloads', methods=['GET'])
+def get_employee_workloads(employee_id):
+    """
+    获取某员工在指定时间段内的工作量明细，支持分页
+    参数：start, end, page, size
+    """
+    try:
+        start = request.args.get('start')
+        end = request.args.get('end')
+        page = int(request.args.get('page', 1))
+        size = int(request.args.get('size', 20))
+        query = WorkloadRecord.query.filter_by(employee_id=employee_id)
+        if start:
+            query = query.filter(WorkloadRecord.date >= start)
+        if end:
+            query = query.filter(WorkloadRecord.date <= end)
+        total = query.count()
+        records = query.order_by(WorkloadRecord.date.desc()).offset((page-1)*size).limit(size).all()
+        return jsonify({
+            'total': total,
+            'page': page,
+            'size': size,
+            'data': [r.to_dict() for r in records]
+        })
+    except Exception as e:
+        logger.error(f"获取员工工作量明细失败: {str(e)}")
+        return APIResponse.database_error(str(e))
+
 @employees_bp.route('/<int:employee_id>/stats', methods=['GET'])
 def get_employee_stats(employee_id):
     """
-    获取员工工作统计
-    参数: employee_id - 员工ID
-    查询参数: start_date, end_date (可选)
-    返回: 员工统计数据，标准化响应格式
+    获取某员工的聚合统计（总WE、过程WE、平均迭代、参与项目数等）
+    参数：period（如7d/30d/90d），默认7d
     """
     try:
-        from models import EmployeeMapping
-        employee = EmployeeMapping.query.get(employee_id)
-        if not employee:
-            return APIResponse.not_found("员工", employee_id)
-        # 获取查询参数
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        # 统计逻辑委托给data_manager
-        stats = data_manager.get_employee_stats(employee_id, start_date, end_date)
-        return APIResponse.success(data=stats, message="员工统计数据获取成功")
+        period = request.args.get('period', '7d')
+        days = int(period.replace('d',''))
+        since = datetime.now().date() - timedelta(days=days)
+        records = WorkloadRecord.query.filter(
+            WorkloadRecord.employee_id == employee_id,
+            WorkloadRecord.date >= since
+        ).all()
+        total_we = sum([r.we_value for r in records])
+        process_we = sum([r.we_value for r in records if r.is_iteration])
+        final_we = sum([r.we_value for r in records if r.is_final])
+        avg_iteration = sum([r.iteration_count for r in records]) / len(records) if records else 0
+        project_ids = set([r.project_id for r in records])
+        return jsonify({
+            'employee_id': employee_id,
+            'period': period,
+            'total_we': total_we,
+            'process_we': process_we,
+            'final_we': final_we,
+            'avg_iteration': avg_iteration,
+            'project_count': len(project_ids)
+        })
     except Exception as e:
         logger.error(f"获取员工统计失败: {str(e)}")
+        return APIResponse.database_error(str(e))
+
+@employees_bp.route('/<int:employee_id>/risk-events', methods=['GET'])
+def get_employee_risk_events(employee_id):
+    """
+    获取某员工相关的风险事件，支持 period、分页
+    """
+    try:
+        period = request.args.get('period', '30d')
+        days = int(period.replace('d',''))
+        since = datetime.now() - timedelta(days=days)
+        page = int(request.args.get('page', 1))
+        size = int(request.args.get('size', 20))
+        query = RiskEvent.query.filter(
+            RiskEvent.employee_id == employee_id,
+            RiskEvent.event_time >= since
+        )
+        total = query.count()
+        events = query.order_by(RiskEvent.event_time.desc()).offset((page-1)*size).limit(size).all()
+        return jsonify({
+            'total': total,
+            'page': page,
+            'size': size,
+            'data': [e.to_dict() for e in events]
+        })
+    except Exception as e:
+        logger.error(f"获取员工风险事件失败: {str(e)}")
         return APIResponse.database_error(str(e))
 
 @employees_bp.route('/stats/overview', methods=['GET'])

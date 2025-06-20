@@ -6,6 +6,10 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, and_, desc
 import logging
 from db import db
+from models.workload import WorkloadRecord
+from models.project_health import ProjectHealthStats
+from models.risk_event import RiskEvent
+from models import ChatMessage, FileRecord, Project, EmployeeMapping, ProjectChatroom
 
 # 创建仪表盘蓝图
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/v1/dashboard')
@@ -199,80 +203,79 @@ def get_dashboard_trends():
 @dashboard_bp.route('/top-performers', methods=['GET'])
 def get_top_performers():
     """
-    获取表现最佳的员工
-    查询参数: limit (默认10), period (today, week, month)
-    返回: 员工表现排名
+    获取表现最佳员工
+    查询参数: period (默认30天)
+    返回: 表现最佳员工列表
     """
     try:
         # 获取查询参数
-        limit = request.args.get('limit', 10, type=int)
-        period = request.args.get('period', 'week')
+        period = request.args.get('period', '30d')
+        days = int(period.replace('d', ''))
         
         # 计算时间范围
-        now = datetime.now()
-        if period == 'today':
-            start_time = datetime.combine(now.date(), datetime.min.time())
-        elif period == 'week':
-            start_time = now - timedelta(days=7)
-        elif period == 'month':
-            start_time = now - timedelta(days=30)
-        else:
-            start_time = now - timedelta(days=7)  # 默认一周
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=days)
         
-        # 统计消息数量排名
-        message_rankings = db.session.query(
+        # 统计每个员工的消息数量
+        employee_stats = db.session.query(
             ChatMessage.sender_name,
             func.count(ChatMessage.id).label('message_count')
         ).filter(
-            ChatMessage.timestamp >= start_time
+            ChatMessage.timestamp >= start_time,
+            ChatMessage.timestamp <= end_time
         ).group_by(
             ChatMessage.sender_name
         ).order_by(
-            desc(func.count(ChatMessage.id))
-        ).limit(limit).all()
+            func.count(ChatMessage.id).desc()
+        ).limit(10).all()
         
-        # 统计文件数量排名
-        file_rankings = db.session.query(
-            FileRecord.author_abbreviation,
+        # 统计每个员工的文件数量
+        file_stats = db.session.query(
+            FileRecord.uploader,
             func.count(FileRecord.id).label('file_count')
         ).filter(
-            FileRecord.upload_time >= start_time
+            FileRecord.upload_time >= start_time,
+            FileRecord.upload_time <= end_time
         ).group_by(
-            FileRecord.author_abbreviation
+            FileRecord.uploader
         ).order_by(
-            desc(func.count(FileRecord.id))
-        ).limit(limit).all()
+            func.count(FileRecord.id).desc()
+        ).limit(10).all()
         
-        # 获取员工映射信息
-        employee_mappings = {
-            emp.wechat_nickname: emp.real_name 
-            for emp in EmployeeMapping.query.all()
-        }
-        
-        # 格式化消息排名数据
-        message_data = []
-        for rank, (sender_name, count) in enumerate(message_rankings, 1):
-            message_data.append({
-                'rank': rank,
-                'sender_name': sender_name,
-                'real_name': employee_mappings.get(sender_name, sender_name),
-                'message_count': count
+        # 合并统计结果
+        performers = []
+        for stat in employee_stats:
+            performers.append({
+                'name': stat.sender_name,
+                'message_count': stat.message_count,
+                'file_count': 0,
+                'total_score': stat.message_count
             })
         
-        # 格式化文件排名数据
-        file_data = []
-        for rank, (author_abbr, count) in enumerate(file_rankings, 1):
-            file_data.append({
-                'rank': rank,
-                'author_abbreviation': author_abbr,
-                'file_count': count
-            })
+        # 添加文件统计
+        for stat in file_stats:
+            found = False
+            for performer in performers:
+                if performer['name'] == stat.uploader:
+                    performer['file_count'] = stat.file_count
+                    performer['total_score'] += stat.file_count * 2  # 文件权重更高
+                    found = True
+                    break
+            if not found:
+                performers.append({
+                    'name': stat.uploader,
+                    'message_count': 0,
+                    'file_count': stat.file_count,
+                    'total_score': stat.file_count * 2
+                })
+        
+        # 按总分排序
+        performers.sort(key=lambda x: x['total_score'], reverse=True)
         
         return jsonify({
             'success': True,
             'data': {
-                'message_rankings': message_data,
-                'file_rankings': file_data,
+                'performers': performers[:10],
                 'period': period,
                 'start_time': start_time.isoformat()
             }
@@ -284,49 +287,260 @@ def get_top_performers():
 @dashboard_bp.route('/project-summary', methods=['GET'])
 def get_project_summary():
     """
-    获取项目汇总数据
-    返回: 项目汇总统计
+    获取项目风险榜，按健康分倒序
+    直接从聚合后的项目健康统计表中获取，更高效稳定
+    """
+    summary = ProjectHealthStats.query.order_by(ProjectHealthStats.health_score.asc()).limit(20).all()
+    return jsonify([s.to_dict() for s in summary])
+
+# ========== 新增：兼容前端的仪表盘统计接口 ==========
+
+@dashboard_bp.route('/stats', methods=['GET'])
+def dashboard_stats():
+    """
+    兼容前端：返回仪表盘总览统计，直接返回DashboardStats结构
     """
     try:
-        # 获取所有项目
-        projects = Project.query.all()
-        project_summary = []
-        
-        for project in projects:
-            # 统计项目相关的聊天消息
-            chatroom_names = [
-                chatroom.chatroom_name 
-                for chatroom in ProjectChatroom.query.filter_by(project_id=project.id).all()
-            ]
-            
-            message_count = 0
-            if chatroom_names:
-                message_count = ChatMessage.query.filter(
-                    ChatMessage.talker_name.in_(chatroom_names)
-                ).count()
-            
-            # 统计项目相关的文件
-            file_count = FileRecord.query.filter(
-                FileRecord.project_name == project.name
+        total_employees = EmployeeMapping.query.count()
+        active_projects = Project.query.count()
+        total_files = FileRecord.query.count()
+        compliant_files = FileRecord.query.filter_by(status='compliant').count()
+        # 近7天文件上传趋势
+        today = datetime.now().date()
+        recent_files = []
+        for i in range(7):
+            day = today - timedelta(days=6-i)
+            count = FileRecord.query.filter(
+                FileRecord.upload_time >= datetime.combine(day, datetime.min.time()),
+                FileRecord.upload_time <= datetime.combine(day, datetime.max.time())
             ).count()
-            
-            project_summary.append({
-                'id': project.id,
-                'name': project.name,
-                'description': project.description,
-                'status': project.status,
-                'message_count': message_count,
-                'file_count': file_count,
-                'chatroom_count': len(chatroom_names)
+            recent_files.append({'date': str(day), 'count': count})
+        return jsonify({'success': True, 'data': {
+            'total_employees': total_employees,
+            'active_projects': active_projects,
+            'total_files': total_files,
+            'compliant_files': compliant_files,
+            'recent_files': recent_files
+        }})
+    except Exception as e:
+        logger.error(f"获取仪表盘总览失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@dashboard_bp.route('/employee-ranking', methods=['GET'])
+def get_employee_ranking():
+    """
+    获取员工效能榜，支持按岗位、周期筛选
+    数据源为 WorkloadRecord，统计 WE 值
+    """
+    period = request.args.get('period', '30d')
+    role = request.args.get('role')
+    days = int(period.replace('d',''))
+    since = datetime.now().date() - timedelta(days=days)
+
+    query = db.session.query(
+        EmployeeMapping.real_name,
+        func.sum(WorkloadRecord.we_value).label('total_we')
+    ).join(WorkloadRecord, EmployeeMapping.id == WorkloadRecord.employee_id)\
+    .filter(WorkloadRecord.date >= since)
+    
+    if role:
+        # 注意：EmployeeMapping 中需要有 role 字段
+        employee_query = EmployeeMapping.query.filter(EmployeeMapping.position.ilike(f'%{role}%')).with_entities(EmployeeMapping.id)
+        employee_ids = [item[0] for item in employee_query]
+        query = query.filter(WorkloadRecord.employee_id.in_(employee_ids))
+
+    ranking = query.group_by(EmployeeMapping.real_name).order_by(func.sum(WorkloadRecord.we_value).desc()).limit(20).all()
+    
+    return jsonify([{'name': r.real_name, 'total_we': r.total_we} for r in ranking])
+
+@dashboard_bp.route('/negative-feedback', methods=['GET'])
+def dashboard_negative_feedback():
+    """
+    兼容前端：返回负面反馈，直接返回NegativeFeedback[]
+    """
+    try:
+        negative_keywords = ['不行', '做不了', '有问题', '延误', '投诉', '失败']
+        messages = ChatMessage.query.filter(
+            db.or_(*[ChatMessage.content.contains(word) for word in negative_keywords])
+        ).order_by(ChatMessage.timestamp.desc()).limit(20).all()
+        result = []
+        for msg in messages:
+            found_keywords = [word for word in negative_keywords if word in (msg.content or '')]
+            result.append({
+                'sender_name': msg.sender_name,
+                'content': msg.content,
+                'message_time': msg.timestamp.isoformat() if msg.timestamp else '',
+                'group_name': msg.talker_name,
+                'negative_keywords': found_keywords
             })
-        
-        # 按消息数量排序
-        project_summary.sort(key=lambda x: x['message_count'], reverse=True)
-        
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        logger.error(f"获取负面反馈失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@dashboard_bp.route('/recent-activities', methods=['GET'])
+def dashboard_recent_activities():
+    """
+    兼容前端：返回近期动态，直接返回RecentActivity[]
+    """
+    try:
+        # 最近10个文件上传
+        files = FileRecord.query.order_by(FileRecord.upload_time.desc()).limit(10).all()
+        file_acts = [{
+            'type': 'file_upload',
+            'title': f.original_name,
+            'description': f'由{f.uploader}上传',
+            'time': f.upload_time.isoformat() if f.upload_time else '',
+            'status': f.status
+        } for f in files]
+        # 最近10个项目更新（示例，实际可扩展）
+        projects = Project.query.order_by(Project.updated_at.desc()).limit(10).all()
+        proj_acts = [{
+            'type': 'project_update',
+            'title': p.project_name,
+            'description': p.description or '',
+            'time': p.updated_at.isoformat() if p.updated_at else '',
+            'status': p.status
+        } for p in projects]
+        acts = sorted(file_acts + proj_acts, key=lambda x: x['time'], reverse=True)[:10]
+        return jsonify({'success': True, 'data': acts})
+    except Exception as e:
+        logger.error(f"获取近期动态失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ========== 新增：工作量明细记录API ========== 
+
+@dashboard_bp.route('/workloads', methods=['GET'])
+def get_workload_records():
+    """
+    获取所有工作量明细记录（支持分页、筛选）
+    查询参数：page, page_size, employee_id, project_id, date_start, date_end
+    返回：工作量明细记录列表及分页信息
+    """
+    try:
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('page_size', 20, type=int)
+        employee_id = request.args.get('employee_id', type=int)
+        project_id = request.args.get('project_id', type=int)
+        date_start = request.args.get('date_start')
+        date_end = request.args.get('date_end')
+
+        query = WorkloadRecord.query
+        if employee_id:
+            query = query.filter_by(employee_id=employee_id)
+        if project_id:
+            query = query.filter_by(project_id=project_id)
+        if date_start:
+            try:
+                start_dt = datetime.fromisoformat(date_start)
+                query = query.filter(WorkloadRecord.date >= start_dt)
+            except Exception:
+                pass
+        if date_end:
+            try:
+                end_dt = datetime.fromisoformat(date_end)
+                query = query.filter(WorkloadRecord.date <= end_dt)
+            except Exception:
+                pass
+        total = query.count()
+        records = query.order_by(WorkloadRecord.date.desc()).offset((page-1)*page_size).limit(page_size).all()
         return jsonify({
             'success': True,
-            'data': project_summary
+            'data': [r.to_dict() for r in records],
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total': total
+            }
         })
     except Exception as e:
-        logger.error(f"获取项目汇总失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500 
+        logger.error(f"获取工作量明细记录失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@dashboard_bp.route('/workloads', methods=['POST'])
+def create_workload_record():
+    """
+    新增工作量明细记录
+    请求体：JSON格式，包含WorkloadRecord所有必需字段
+    返回：新增记录详情
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '缺少请求数据'}), 400
+        # 字段校验与赋值
+        record = WorkloadRecord(
+            employee_id = data.get('employee_id'),
+            project_id = data.get('project_id'),
+            date = datetime.fromisoformat(data.get('date')) if data.get('date') else datetime.now().date(),
+            role = data.get('role', ''),
+            output_type = data.get('output_type', ''),
+            output_value = data.get('output_value', ''),
+            we_value = data.get('we_value', 0.0),
+            is_final = data.get('is_final', False),
+            is_iteration = data.get('is_iteration', False),
+            iteration_count = data.get('iteration_count', 0),
+            related_file_id = data.get('related_file_id'),
+            related_message_id = data.get('related_message_id'),
+            business_unit = data.get('business_unit', ''),
+            quantity = data.get('quantity', 1.0)
+        )
+        db.session.add(record)
+        db.session.commit()
+        return jsonify({'success': True, 'data': record.to_dict()})
+    except Exception as e:
+        logger.error(f"新增工作量明细记录失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@dashboard_bp.route('/workloads/<int:record_id>', methods=['GET'])
+def get_workload_record_detail(record_id):
+    """
+    获取单条工作量明细记录详情
+    参数：record_id - 记录ID
+    返回：记录详情
+    """
+    try:
+        record = WorkloadRecord.query.get(record_id)
+        if not record:
+            return jsonify({'success': False, 'error': '记录不存在'}), 404
+        return jsonify({'success': True, 'data': record.to_dict()})
+    except Exception as e:
+        logger.error(f"获取工作量明细记录详情失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@dashboard_bp.route('/project-health', methods=['GET'])
+def get_project_health_stats():
+    """
+    获取所有项目的健康度统计数据
+    支持前端仪表盘项目榜单、健康趋势等区块
+    """
+    stats = ProjectHealthStats.query.order_by(ProjectHealthStats.created_at.desc()).all()
+    return jsonify([s.to_dict() for s in stats])
+
+@dashboard_bp.route('/risk-feed', methods=['GET'])
+def get_risk_feed():
+    """
+    获取最新风险事件流
+    支持前端仪表盘风险流、预警推送等区块
+    """
+    events = RiskEvent.query.order_by(RiskEvent.event_time.desc()).limit(30).all()
+    return jsonify([e.to_dict() for e in events])
+
+@dashboard_bp.route('/workload-trend', methods=['GET'])
+def get_workload_trend():
+    """
+    获取团队/岗位的工作量趋势
+    参数：period（如7d/30d/90d），role（可选）
+    """
+    period = request.args.get('period', '7d')
+    role = request.args.get('role')
+    days = int(period.replace('d',''))
+    since = datetime.now().date() - timedelta(days=days)
+    query = db.session.query(
+        WorkloadRecord.date,
+        func.sum(WorkloadRecord.we_value).label('total_we')
+    ).filter(WorkloadRecord.date >= since)
+    if role:
+        query = query.filter(WorkloadRecord.role == role)
+    trend = query.group_by(WorkloadRecord.date).order_by(WorkloadRecord.date).all()
+    return jsonify([{'date': r.date.isoformat(), 'total_we': r.total_we} for r in trend]) 

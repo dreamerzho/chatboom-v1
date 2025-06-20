@@ -20,7 +20,8 @@ import {
   Row,
   Col,
   Spin,
-  Alert
+  Alert,
+  Select
 } from 'antd';
 import { 
   PlusOutlined, 
@@ -29,7 +30,7 @@ import {
   UserOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
-import { employeeAPI } from '../../lib/api';
+import { employeeAPI, unmatchedAPI, projectAPI } from '../../lib/api';
 
 const { Title, Text } = Typography;
 
@@ -52,6 +53,62 @@ interface EmployeeFormData {
   name_abbreviation: string;
 }
 
+// 未匹配人员类型
+type UnmatchedPerson = {
+  id: number;
+  sender_name: string;
+  group_name: string;
+  role: string;
+  remark: string;
+  created_at: string;
+  updated_at: string;
+};
+
+// 项目数据接口
+interface Project {
+  id: number;
+  project_name: string;
+  external_group_name?: string;
+  internal_group_name?: string;
+}
+
+// 常用角色标签
+const ROLE_OPTIONS = [
+  '员工', '项目经理', '客户', '老板', '行政', '客户策划', '客户营销', '客户总监', '客户助理', '其他'
+];
+
+/**
+ * 智能推荐角色函数
+ * 根据群聊名、发言人昵称、历史岗位统计等，返回推荐角色列表
+ * @param person 未匹配人员对象
+ * @param employees 员工列表
+ * @returns 推荐角色数组
+ */
+function getRecommendedRoles(person: UnmatchedPerson | null, employees: Employee[]): string[] {
+  if (!person) return [];
+  const { group_name, sender_name } = person;
+  // 1. 根据群聊名关键词推荐
+  const groupBased: string[] = [];
+  if (group_name.includes('客户')) groupBased.push('客户');
+  if (group_name.includes('老板')) groupBased.push('老板');
+  if (group_name.includes('行政')) groupBased.push('行政');
+  if (group_name.includes('策划')) groupBased.push('客户策划');
+  if (group_name.includes('营销')) groupBased.push('客户营销');
+  if (group_name.includes('总监')) groupBased.push('客户总监');
+  // 2. 历史岗位统计（同昵称员工出现频率最高的岗位）
+  const matched = employees.filter(e => e.wechat_nickname === sender_name);
+  if (matched.length > 0) {
+    const freq: Record<string, number> = {};
+    matched.forEach(e => { freq[e.position] = (freq[e.position] || 0) + 1; });
+    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0) groupBased.unshift(sorted[0][0]);
+  }
+  // 3. 默认推荐"员工"
+  if (groupBased.length === 0) groupBased.push('员工');
+  // 4. 去重
+  return Array.from(new Set(groupBased));
+}
+
 function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +116,10 @@ function EmployeesPage() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [form] = Form.useForm();
+  const [unmatchedPersons, setUnmatchedPersons] = useState<UnmatchedPerson[]>([]);
+  const [unmatchedLoading, setUnmatchedLoading] = useState(true);
+  const [unmatchedModal, setUnmatchedModal] = useState<{visible: boolean, person: UnmatchedPerson | null, recommendedProject?: Project | null}>({visible: false, person: null, recommendedProject: null});
+  const [projects, setProjects] = useState<Project[]>([]);
 
   // 获取员工列表
   const fetchEmployees = async () => {
@@ -69,7 +130,7 @@ function EmployeesPage() {
       const response = await employeeAPI.getEmployees();
       
       if (response.success) {
-        setEmployees(response.data || []);
+        setEmployees(Array.isArray(response.data) ? response.data : []);
       } else {
         setError(response.error || '获取员工列表失败');
         message.error('获取员工列表失败');
@@ -80,6 +141,37 @@ function EmployeesPage() {
       message.error('网络请求失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 获取未匹配人员
+  const fetchUnmatchedPersons = async () => {
+    try {
+      setUnmatchedLoading(true);
+      const response = await unmatchedAPI.getUnmatchedPersons();
+      if (response.success) {
+        setUnmatchedPersons(Array.isArray(response.data) ? response.data : []);
+      } else {
+        message.error('获取未匹配人员失败');
+      }
+    } catch {
+      message.error('获取未匹配人员失败');
+    } finally {
+      setUnmatchedLoading(false);
+    }
+  };
+
+  // 获取项目列表
+  const fetchProjects = async () => {
+    try {
+      const res = await projectAPI.getProjects();
+      if (res.success && Array.isArray(res.data)) {
+        setProjects(res.data);
+      } else {
+        setProjects([]);
+      }
+    } catch {
+      setProjects([]);
     }
   };
 
@@ -179,10 +271,57 @@ function EmployeesPage() {
     });
   };
 
-  // 组件加载时获取数据
+  // 分配角色
+  const handleAssignRole = (person: UnmatchedPerson) => {
+    const recommendedProject = getRecommendedProject(person, projects);
+    setUnmatchedModal({visible: true, person, recommendedProject});
+  };
+  const handleUnmatchedModalOk = async (values: {role: string, remark: string, project_id?: number}) => {
+    if (!unmatchedModal.person) return;
+    const groupType = unmatchedModal.person.group_name.includes('内部') ? 'internal' : 'external';
+    try {
+      const res = await unmatchedAPI.updateUnmatchedPerson(unmatchedModal.person.id, {
+        ...values,
+        group_type: groupType
+      } as Partial<UnmatchedPerson>);
+      if (res.success) {
+        message.success('角色分配成功');
+        setUnmatchedModal({visible: false, person: null, recommendedProject: undefined});
+        fetchUnmatchedPersons();
+        fetchEmployees();
+      } else {
+        message.error('角色分配失败');
+      }
+    } catch {
+      message.error('角色分配失败');
+    }
+  };
+  const handleUnmatchedModalCancel = () => {
+    setUnmatchedModal({visible: false, person: null, recommendedProject: undefined});
+  };
+
+  // 页面加载时获取员工、未匹配人员、项目
   useEffect(() => {
     fetchEmployees();
+    fetchUnmatchedPersons();
+    fetchProjects();
   }, []);
+
+  // 推荐项目函数：根据群聊名模糊匹配项目名/群聊名
+  function getRecommendedProject(person: UnmatchedPerson | null, projects: Project[]): Project | null {
+    if (!person || projects.length === 0) return null;
+    const { group_name } = person;
+    // 优先项目名包含群聊名
+    let match = projects.find(p => group_name && p.project_name && group_name.includes(p.project_name));
+    if (match) return match;
+    // 其次项目的external_group_name/internal_group_name包含群聊名
+    match = projects.find(p => (p.external_group_name && group_name && group_name.includes(p.external_group_name)) || (p.internal_group_name && group_name && group_name.includes(p.internal_group_name)));
+    if (match) return match;
+    // 反向：项目名包含群聊名
+    match = projects.find(p => p.project_name && group_name && p.project_name.includes(group_name));
+    if (match) return match;
+    return null;
+  }
 
   // 表格列定义
 const columns = [
@@ -232,7 +371,7 @@ const columns = [
     {
       title: '操作',
       key: 'action',
-      render: (_, record: Employee) => (
+      render: (_: unknown, record: Employee) => (
         <Space size="middle">
           <Button 
             type="link" 
@@ -371,6 +510,25 @@ const columns = [
         />
       </Card>
 
+      {/* 未匹配人员分区 */}
+      <Card title="未匹配人员（需人工分配角色）" style={{ marginTop: 32, marginBottom: 24 }}>
+        <Table
+          dataSource={unmatchedPersons}
+          loading={unmatchedLoading}
+          rowKey="id"
+          pagination={{ pageSize: 8 }}
+          columns={[
+            { title: '发言人昵称', dataIndex: 'sender_name', key: 'sender_name' },
+            { title: '群聊名称', dataIndex: 'group_name', key: 'group_name' },
+            { title: '当前角色', dataIndex: 'role', key: 'role', render: (text: string) => <Text type={text==='未知'?'danger':'success'}>{text}</Text> },
+            { title: '备注', dataIndex: 'remark', key: 'remark' },
+            { title: '操作', key: 'action', render: (_: unknown, record: UnmatchedPerson) => (
+              <Button type="link" onClick={() => handleAssignRole(record)}>分配角色</Button>
+            ) },
+          ]}
+        />
+      </Card>
+
       {/* 添加/编辑员工模态框 */}
       <Modal
         title={editingEmployee ? '编辑员工' : '添加员工'}
@@ -429,6 +587,91 @@ const columns = [
             ]}
           >
             <Input placeholder="请输入姓名缩写，如：ZS、LJ等" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 分配角色弹窗 */}
+      <Modal
+        title="分配/修改角色"
+        open={unmatchedModal.visible}
+        onCancel={handleUnmatchedModalCancel}
+        onOk={() => {
+          (document.getElementById('unmatched-role-form-submit') as HTMLElement)?.click();
+        }}
+        okText="确定"
+        cancelText="取消"
+        destroyOnClose
+      >
+        {/* 智能推荐提示 */}
+        {unmatchedModal.visible && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={
+              <span>
+                推荐角色：
+                <span style={{ color: '#1890ff', fontWeight: 600 }}>
+                  {getRecommendedRoles(unmatchedModal.person, employees).join(' / ') || '员工'}
+                </span>
+                <span style={{ marginLeft: 8, color: '#888', fontSize: 12 }}>
+                  （可直接选择或自定义输入）
+                </span>
+                {unmatchedModal.recommendedProject && (
+                  <span style={{ marginLeft: 16, color: '#52c41a', fontWeight: 600 }}>
+                    推荐项目：{unmatchedModal.recommendedProject.project_name}
+                  </span>
+                )}
+              </span>
+            }
+          />
+        )}
+        <Form
+          initialValues={{
+            role: unmatchedModal.person?.role || getRecommendedRoles(unmatchedModal.person, employees)[0] || '',
+            remark: unmatchedModal.person?.remark || '',
+            project_id: unmatchedModal.recommendedProject?.id || undefined
+          }}
+          onFinish={handleUnmatchedModalOk}
+          layout="vertical"
+        >
+          <Form.Item 
+            name="role" 
+            label={<span>角色 <span style={{ color: 'red' }}>*</span></span>} 
+            rules={[{ required: true, message: '请选择或输入角色（必填）' }]}
+            extra={<span style={{ color: '#888', fontSize: 12 }}>支持多标签，优先选择推荐项</span>}
+          > 
+            <Select
+              mode="tags"
+              style={{ width: '100%' }}
+              placeholder="请选择或输入角色"
+              options={ROLE_OPTIONS.map(opt => ({ label: opt, value: opt, style: getRecommendedRoles(unmatchedModal.person, employees).includes(opt) ? { fontWeight: 700, color: '#1890ff' } : {} }))}
+              maxTagCount={3}
+              showSearch
+              allowClear
+            />
+          </Form.Item>
+          <Form.Item
+            name="project_id"
+            label={<span>归属项目 <span style={{ color: 'red' }}>*</span></span>}
+            rules={[{ required: true, message: '请选择归属项目（必填）' }]}
+            extra={<span style={{ color: '#888', fontSize: 12 }}>系统已自动推荐，支持手动修改</span>}
+          >
+            <Select
+              showSearch
+              placeholder="请选择归属项目"
+              optionFilterProp="children"
+              options={projects.map(p => ({ label: p.project_name, value: p.id }))}
+              value={unmatchedModal.recommendedProject?.id}
+              allowClear
+            />
+          </Form.Item>
+          <Form.Item name="remark" label="备注">
+            <Input.TextArea placeholder="可填写推测依据或其他说明" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" id="unmatched-role-form-submit" style={{ display: 'none' }}>提交</Button>
           </Form.Item>
         </Form>
       </Modal>

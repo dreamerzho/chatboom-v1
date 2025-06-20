@@ -11,6 +11,8 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from difflib import SequenceMatcher
+from models.unmatched_person import UnmatchedPerson
+from db import db
 
 logger = logging.getLogger(__name__)
 
@@ -294,12 +296,12 @@ class ChatLogProcessor:
             'sender_role': role
         }
 
-    def process_chatlog(self, 
+    def process_and_deduplicate(self, 
                        chatlog: List[Dict[str, Any]], 
-                       employees: List[Dict[str, Any]] = None,
-                       group_info: Dict[str, Any] = None) -> Dict[str, Any]:
+                       employees: List[Dict[str, Any]],
+                       group_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        处理聊天记录 - 重构版
+        处理聊天记录并去重 - 群聊类型与角色区分增强版
         
         参数:
             chatlog: 原始聊天记录列表
@@ -310,13 +312,9 @@ class ChatLogProcessor:
             处理结果
         """
         try:
-            # 设置默认群聊信息
-            if not group_info:
-                group_info = {
-                    'chatroom_name': '未知群聊',
-                    'project_name': '未知项目',
-                    'group_type': 'unknown'
-                }
+            # 设置默认群聊信息（已强制要求传入，不再自动补全）
+            if not group_info or 'group_type' not in group_info:
+                raise ValueError('group_info参数必须包含group_type')
             
             result = {
                 'total_messages': len(chatlog),
@@ -350,37 +348,50 @@ class ChatLogProcessor:
                     parsed_message = self.parser.parse_message(message)
                     
                     # 匹配员工
-                    if employees:
-                        matched_employee, role = self._associate_employee(
-                            parsed_message['sender_name'], 
-                            employees,
-                            group_info.get('group_type', 'unknown')
-                        )
-                        
-                        if role == 'employee':
-                            result['matched_employees'] += 1
-                            # 统计员工消息数量
-                            emp_id = matched_employee['id']
-                            if emp_id not in result['employee_stats']:
-                                result['employee_stats'][emp_id] = {
-                                    'employee': matched_employee,
-                                    'message_count': 0,
-                                    'file_count': 0
-                                }
-                            result['employee_stats'][emp_id]['message_count'] += 1
-                        elif role == 'client':
-                            result['client_messages'] += 1
-                        else:
-                            result['unmatched_employees'] += 1
+                    matched_employee, role = self._associate_employee(
+                        parsed_message['sender_name'], 
+                        employees,
+                        group_info.get('group_type', 'unknown')
+                    )
+                    
+                    if role == 'employee':
+                        result['matched_employees'] += 1
+                        # 统计员工消息数量
+                        emp_id = matched_employee['id']
+                        if emp_id not in result['employee_stats']:
+                            result['employee_stats'][emp_id] = {
+                                'employee': matched_employee,
+                                'message_count': 0,
+                                'file_count': 0
+                            }
+                        result['employee_stats'][emp_id]['message_count'] += 1
+                    elif role == 'client':
+                        result['client_messages'] += 1
                     else:
-                        matched_employee = None
-                        role = 'unknown'
+                        result['unmatched_employees'] += 1
+                        # 记录未匹配人员到数据库
+                        try:
+                            unmatched = UnmatchedPerson.query.filter_by(
+                                sender_name=parsed_message['sender_name'],
+                                group_name=group_info.get('chatroom_name', '未知群聊')
+                            ).first()
+                            if not unmatched:
+                                unmatched = UnmatchedPerson(
+                                    sender_name=parsed_message['sender_name'],
+                                    group_name=group_info.get('chatroom_name', '未知群聊'),
+                                    role='未知',
+                                    remark='自动记录，未匹配为员工'
+                                )
+                                db.session.add(unmatched)
+                                db.session.commit()
+                        except Exception as e:
+                            logger.error(f"记录未匹配人员失败: {str(e)}")
                     
                     # 统计消息类型
                     msg_type = parsed_message.get('type')
                     if msg_type == 49 and parsed_message.get('parsed_content', {}).get('filename'):
                         result['file_messages'] += 1
-                        if employees and matched_employee and role == 'employee':
+                        if matched_employee and role == 'employee':
                             emp_id = matched_employee['id']
                             result['employee_stats'][emp_id]['file_count'] += 1
                         
