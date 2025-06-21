@@ -244,17 +244,27 @@ export const employeeAPI = {
 // 项目管理API
 export const projectAPI = {
   // 获取项目列表
-  getProjects: () => apiRequest<Project[]>('/api/v1/projects/'),
+  getProjects: async () => {
+    // 模拟网络延迟
+    await new Promise(resolve => setTimeout(resolve, 500));
+    // 实际项目中,这里会发起fetch请求
+    // return fetch('/api/v1/projects').then(res => res.json());
+    return createSuccessResponse(mockProjects);
+  },
 
   // 添加项目
-  addProject: (project: {
-    project_name: string;
-    description?: string;
-  }) =>
-    apiRequest('/api/v1/projects/', {
-      method: 'POST',
-      body: JSON.stringify(project),
-    }),
+  addProject: async (data: any) => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const newProject = {
+      ...data,
+      id: Math.max(...mockProjects.map(p => p.id)) + 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      status: 'active'
+    };
+    mockProjects.push(newProject);
+    return createSuccessResponse(newProject);
+  },
 
   // 更新项目
   updateProject: (id: number, project: Partial<Project>) =>
@@ -428,3 +438,74 @@ export const unmatchedAPI = {
       body: JSON.stringify(data),
     }),
 };
+
+// --- 以下为模拟数据和函数，用于前端独立开发 ---
+
+// 模拟API成功响应
+const createSuccessResponse = <T>(data: T): ApiResponse<T> => ({
+  success: true,
+  data,
+});
+
+// 模拟API失败响应
+const createErrorResponse = (error: string, _statusCode = 500): ApiResponse<never> => ({
+  success: false,
+  error,
+});
+
+const mockProjects = [
+    {
+        id: 1,
+        project_name: '星润-奥体项目',
+        description: '一个专注于高端住宅和商业办公的综合体项目，强调现代设计与智能化。',
+        status: 'active',
+        created_at: '2024-01-10T09:00:00Z',
+        updated_at: '2024-03-25T18:00:00Z',
+        internal_chat_groups: ['星润奥体内部群', '星润奥体设计群'],
+        external_chat_groups: ['星润奥体客户沟通群'],
+        negative_keywords_count: 3,
+        total_files: 125,
+    },
+    {
+        id: 2,
+        project_name: '建杭-良渚项目',
+        description: '这是一个关于文化遗产保护和现代城市发展的复杂项目，涉及多方协调。',
+        status: 'active',
+        created_at: '2023-11-01T10:00:00Z',
+        updated_at: '2024-03-20T15:30:00Z',
+        internal_chat_groups: ['良渚内部总监群', '良渚设计执行群'],
+        external_chat_groups: ['良渚项目-客户沟通群'],
+        negative_keywords_count: 32,
+        total_files: 231,
+    },
+    {
+        id: 3,
+        project_name: '越秀·勾庄TOD综合体项目',
+        description: '大型城市交通枢纽及商业综合体项目，旨在打造区域新地标。',
+        status: 'active',
+        created_at: '2023-08-15T09:00:00Z',
+        updated_at: '2024-03-22T11:00:00Z',
+        internal_chat_groups: ['勾庄TOD内部群'],
+        external_chat_groups: ['勾庄TOD-客户沟通群', '勾庄TOD-施工方对接群'],
+        negative_keywords_count: 48,
+        total_files: 231,
+    }
+];
+
+// 模拟员工数据
+const mockEmployees = [
+    {
+        id: 1,
+        wechat_nickname: '设计师-小张',
+        real_name: '张三',
+        position: '设计师',
+        name_abbreviation: 'ZS'
+    },
+    {
+        id: 2,
+        wechat_nickname: 'PM-小王',
+        real_name: '王五',
+        position: '项目经理',
+        name_abbreviation: 'WW'
+    }
+];

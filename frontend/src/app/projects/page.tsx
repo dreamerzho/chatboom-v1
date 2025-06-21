@@ -4,6 +4,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
   Card, 
   List, 
@@ -26,7 +27,8 @@ import {
   DatePicker,
   Divider,
   Descriptions,
-  Badge
+  Badge,
+  notification,
 } from 'antd';
 import { 
   PlusOutlined, 
@@ -34,11 +36,12 @@ import {
   DeleteOutlined, 
   SyncOutlined, 
   EyeOutlined, 
-  BarChartOutlined,
   ReloadOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  CloseOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import { projectAPI, syncAPI, chatlogAPI } from '../../lib/api';
 import dayjs from 'dayjs';
@@ -57,18 +60,26 @@ interface Project {
   external_chat_groups?: string[];
   created_at: string;
   updated_at: string;
-  // 新增字段：健康状态和负面关键词统计
   health_status?: 'good' | 'warning' | 'danger';
   negative_keywords_count?: number;
   total_files?: number;
+  rework_rate?: number; // 返工率
+}
+
+// 员工接口 (新增)
+interface Employee {
+  id: number;
+  name: string;
 }
 
 // 项目表单数据接口
 interface ProjectFormData {
   project_name: string;
+  project_short_name: string;
   description: string;
   internal_chat_groups?: string[];
   external_chat_groups?: string[];
+  employee_ids?: number[];
 }
 
 // 群聊接口
@@ -145,23 +156,23 @@ const fetchChatGroups = async (): Promise<string[]> => {
 };
 
 function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [projectStats, setProjectStats] = useState<Record<number, number>>({});
   const [form] = Form.useForm();
   const [chatGroups, setChatGroups] = useState<string[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
 
-  // 同步相关状态
-  const [syncModalVisible, setSyncModalVisible] = useState(false);
-  const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  const [syncForm] = Form.useForm();
-  const [syncLoading, setSyncLoading] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
-  const [syncLog, setSyncLog] = useState<string[]>([]);
+  // 新增状态：用于搜索、过滤和排序
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // all, good, warning, danger
+  const [sortOrder, setSortOrder] = useState('health'); // health, name, activity
+
+  // 同步项目ID状态
+  const [syncingProjectId, setSyncingProjectId] = useState<number | null>(null);
 
   // 获取项目列表
   const fetchProjects = async () => {
@@ -170,12 +181,14 @@ function ProjectsPage() {
       setError(null);
       const response = await projectAPI.getProjects();
       if (response.success && response.data) {
-        const projectsWithHealth = response.data.map((project: Project) => ({
+        const projectsWithMockData = response.data.map((project: Project) => ({
           ...project,
-          health_status: calculateHealthStatus(project)
+          health_status: calculateHealthStatus(project),
+          rework_rate: Math.floor(Math.random() * 25), // 模拟返工率数据
+          total_files: project.total_files || Math.floor(Math.random() * 200) + 20, // 模拟文件总数
+          negative_keywords_count: project.negative_keywords_count || Math.floor(Math.random() * 40), // 模拟负面关键词
         }));
-        setProjects(projectsWithHealth);
-        await fetchProjectStats(projectsWithHealth);
+        setProjects(projectsWithMockData);
       } else {
         setError(response.error || '获取项目列表失败');
       }
@@ -187,20 +200,52 @@ function ProjectsPage() {
     }
   };
 
-  // 获取项目统计信息
-  const fetchProjectStats = async (projectList: Project[]) => {
-    try {
-      const stats: Record<number, number> = {};
-      // 这里可以调用后端API获取每个项目的文件统计
-      // 暂时使用模拟数据
-      projectList.forEach(project => {
-        stats[project.id] = Math.floor(Math.random() * 50) + 10; // 模拟文件数量
-      });
-      setProjectStats(stats);
-    } catch (error) {
-      console.error('获取项目统计失败:', error);
-    }
+  // 获取员工列表 (新增)
+  const fetchEmployees = async () => {
+    // 实际项目中,这里会调用API
+    // const response = await employeeAPI.getEmployees();
+    // if (response.success) setEmployees(response.data);
+    setEmployees([
+      { id: 1, name: '张三' },
+      { id: 2, name: '李四' },
+      { id: 3, name: '王五' },
+      { id: 4, name: '赵六' },
+      { id: 5, name: '孙七' },
+    ]);
   };
+
+  // Memoized: 过滤和排序项目列表
+  const filteredAndSortedProjects = React.useMemo(() => {
+    // 根据用户要求，主列表只展示 "执行中" (active) 的项目
+    let result = projects.filter(p => p.status === 'active');
+
+    // 根据搜索词过滤
+    if (searchQuery) {
+      result = result.filter(p => p.project_name.toLowerCase().includes(searchQuery.toLowerCase()));
+    }
+
+    // 根据健康状态过滤
+    if (statusFilter !== 'all') {
+      result = result.filter(p => p.health_status === statusFilter);
+    }
+    
+    // 排序
+    result.sort((a, b) => {
+      switch (sortOrder) {
+        case 'name':
+          return a.project_name.localeCompare(b.project_name);
+        case 'activity':
+          // 按最近更新时间排序
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        case 'health':
+        default:
+          const healthOrder = { 'good': 1, 'warning': 2, 'danger': 3 };
+          return (healthOrder[a.health_status!] || 4) - (healthOrder[b.health_status!] || 4);
+      }
+    });
+
+    return result;
+  }, [projects, searchQuery, statusFilter, sortOrder]);
 
   // 添加项目
   const handleAddProject = async (values: ProjectFormData) => {
@@ -245,7 +290,7 @@ function ProjectsPage() {
     try {
       const response = await projectAPI.deleteProject(id);
       if (response.success) {
-        message.success('项目删除成功');
+        message.success('项目已成功删除');
         fetchProjects();
       } else {
         message.error(response.error || '项目删除失败');
@@ -256,14 +301,34 @@ function ProjectsPage() {
     }
   };
 
+  // 显示删除确认 (新增)
+  const showDeleteConfirm = (project: Project) => {
+    Modal.confirm({
+      title: '您确定要删除吗？',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>正在删除项目「{project.project_name}」。此操作将会永久删除该项目及其所有关联的统计数据、文件和聊天记录。</p>
+          <Typography.Text strong style={{ color: '#ff4d4f' }}>
+            此操作无法撤销。
+          </Typography.Text>
+        </div>
+      ),
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk() {
+        return handleDeleteProject(project.id);
+      },
+    });
+  };
+
   // 编辑项目
   const handleEdit = (record: Project) => {
     setEditingProject(record);
     form.setFieldsValue({
-      project_name: record.project_name,
-      description: record.description,
-      internal_chat_groups: record.internal_chat_groups,
-      external_chat_groups: record.external_chat_groups
+      ...record,
+      // 如果有关联员工ID, 也需要在这里设置
     });
     setModalVisible(true);
   };
@@ -299,164 +364,56 @@ function ProjectsPage() {
     });
   };
 
-  // 同步数据
-  const handleSyncData = (project: Project) => {
-    setCurrentProject(project);
-    setSyncModalVisible(true);
-    setSyncResult(null);
-    setSyncLog([]);
-    syncForm.resetFields();
-    
-    // 设置默认值
-    syncForm.setFieldsValue({
-      date_range: [dayjs().subtract(7, 'day'), dayjs()],
+  // 同步数据 (重构)
+  const handleSyncData = async (project: Project) => {
+    setSyncingProjectId(project.id);
+    // 快速同步默认使用最近7天的数据
+    const syncRequest = {
+      start_date: dayjs().subtract(7, 'day').format('YYYY-MM-DD'),
+      end_date: dayjs().format('YYYY-MM-DD'),
       sync_type: 'all',
-      chatroom_names: []
-    });
-    
-    // 检查同步状态
-    checkSyncStatus();
-  };
-
-  // 预设时间段选项
-  const getPresetDateRanges = () => {
-    const now = dayjs();
-    const startOfMonth = now.startOf('month');
-    const startOfQuarter = now.startOf('quarter' as any);
-    
-    return [
-      {
-        label: '最近7天',
-        value: 'last7days',
-        range: [now.subtract(7, 'day'), now]
-      },
-      {
-        label: '最近30天',
-        value: 'last30days',
-        range: [now.subtract(30, 'day'), now]
-      },
-      {
-        label: '本月',
-        value: 'thisMonth',
-        range: [startOfMonth, now]
-      },
-      {
-        label: '上月',
-        value: 'lastMonth',
-        range: [startOfMonth.subtract(1, 'month'), startOfMonth.subtract(1, 'day')]
-      },
-      {
-        label: '本季度',
-        value: 'thisQuarter',
-        range: [startOfQuarter, now]
-      },
-      {
-        label: '上个季度',
-        value: 'lastQuarter',
-        range: [startOfQuarter.subtract(3, 'month'), startOfQuarter.subtract(1, 'day')]
-      },
-      {
-        label: '最近半年',
-        value: 'last6months',
-        range: [now.subtract(6, 'month'), now]
-      },
-      {
-        label: '最近一年',
-        value: 'lastYear',
-        range: [now.subtract(1, 'year'), now]
-      }
-    ];
-  };
-
-  // 处理预设时间段选择
-  const handlePresetDateChange = (presetValue: string) => {
-    const presets = getPresetDateRanges();
-    const selectedPreset = presets.find(preset => preset.value === presetValue);
-    
-    if (selectedPreset) {
-      syncForm.setFieldsValue({
-        date_range: selectedPreset.range
-      });
-    }
-  };
-
-  // 检查同步状态
-  const checkSyncStatus = async () => {
+      chatroom_names: [],
+    };
     try {
-      // 先检查Chatlog健康
-      const chatlogRes = await chatlogAPI.getStatus();
-      setSyncStatus({
-        status: chatlogRes.success ? 'running' : 'error',
-        message: chatlogRes.success ? 'Chatlog服务正常' : (chatlogRes.error || 'Chatlog服务异常'),
-        timestamp: new Date().toISOString(),
-        api_base: ''
-      });
-    } catch (error) {
-      setSyncStatus({
-        status: 'error',
-        message: 'Chatlog服务异常',
-        timestamp: new Date().toISOString(),
-        api_base: ''
-      });
-      console.error('检查Chatlog健康失败:', error);
-    }
-  };
-
-  // 执行同步
-  const handleExecuteSync = async () => {
-    try {
-      setSyncLoading(true);
-      setSyncLog([]);
-      setSyncResult(null);
-
-      const values = await syncForm.validateFields();
-      const [startDate, endDate] = values.date_range;
-      
-      const syncRequest = {
-        start_date: startDate.format('YYYY-MM-DD'),
-        end_date: endDate.format('YYYY-MM-DD'),
-        sync_type: values.sync_type,
-        chatroom_names: values.chatroom_names || []
-      };
-
-      setSyncLog([`开始同步项目：${currentProject?.project_name}`]);
-      setSyncLog(prev => [...prev, `时间范围：${syncRequest.start_date} ~ ${syncRequest.end_date}`]);
-      setSyncLog(prev => [...prev, `同步类型：${syncRequest.sync_type}`]);
-
-      const response = await syncAPI.syncProject(currentProject!.id, syncRequest);
-      
-      if (response.success && response.data) {
-        setSyncResult(response.data.results);
-        setSyncLog(response.data.log);
-        message.success('同步完成！');
+      const response = await syncAPI.syncProject(project.id, syncRequest);
+      if (response.success && response.data && response.data.results) {
+        const { total_messages, total_files } = response.data.results;
+        notification.success({
+          message: '同步成功',
+          description: `项目「${project.project_name}」数据已更新。新增聊天记录 ${total_messages} 条，新识别文件 ${total_files} 个。`,
+          placement: 'topRight',
+        });
+        fetchProjects(); // 重新获取数据以更新卡片信息
       } else {
-        setSyncLog(prev => [...prev, `同步失败：${response.error}`]);
-        message.error(response.error || '同步失败');
+        notification.error({
+          message: '同步失败',
+          description: response.error || '无法连接到聊天记录服务器，请检查服务状态或稍后重试。',
+          placement: 'topRight',
+          duration: 0, // 永久显示直到用户关闭
+        });
       }
     } catch (error) {
       console.error('同步失败:', error);
-      setSyncLog(prev => [...prev, `同步失败：${error}`]);
-      message.error('同步失败');
+      notification.error({
+        message: '同步失败',
+        description: '发生未知错误，请联系技术支持。',
+        placement: 'topRight',
+        duration: 0,
+      });
     } finally {
-      setSyncLoading(false);
+      setSyncingProjectId(null);
     }
   };
 
-  // 查看项目详情
+  // 查看项目详情 (重构)
   const handleViewDetails = (project: Project) => {
-    message.info(`查看项目详情：${project.project_name}（功能开发中）`);
-    // TODO: 跳转到项目详情页 /projects/[id]
-  };
-
-  // 生成报告
-  const handleGenerateReport = (project: Project) => {
-    message.info(`生成项目报告：${project.project_name}（功能开发中）`);
-    // TODO: 生成项目报告功能
+    router.push(`/projects/${project.id}`);
   };
 
   // 加载群聊列表
   useEffect(() => {
     fetchChatGroups().then(setChatGroups);
+    fetchEmployees();
   }, []);
 
   // 组件加载时获取数据
@@ -483,18 +440,11 @@ function ProjectsPage() {
         <Title level={2}>项目视图</Title>
         <Space>
           <Button 
-            icon={<ReloadOutlined />} 
-            onClick={fetchProjects}
-            loading={loading}
-          >
-            刷新
-          </Button>
-          <Button 
             type="primary" 
             icon={<PlusOutlined />} 
             onClick={handleAdd}
           >
-            添加项目
+            新建项目
           </Button>
         </Space>
       </div>
@@ -515,146 +465,122 @@ function ProjectsPage() {
         />
       )}
 
-      {/* 项目统计 */}
+      {/* 项目统计 - 更新为新设计 */}
       <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={6}>
+        <Col span={8}>
           <Card>
             <Statistic
               title="项目总数"
               value={projects.length}
-              prefix={<BarChartOutlined />}
               valueStyle={{ color: '#1890ff' }}
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col span={8}>
           <Card>
             <Statistic
-              title="活跃项目"
+              title="执行中项目数"
               value={projects.filter(p => p.status === 'active').length}
-              prefix={<BarChartOutlined />}
               valueStyle={{ color: '#52c41a' }}
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col span={8}>
           <Card>
             <Statistic
-              title="文件总数"
-              value={Object.values(projectStats).reduce((sum, count) => sum + count, 0)}
-              prefix={<BarChartOutlined />}
-              valueStyle={{ color: '#722ed1' }}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="健康项目"
-              value={projects.filter(p => p.health_status === 'good').length}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#52c41a' }}
+              title="已结束项目数"
+              value={projects.filter(p => p.status !== 'active').length}
+              valueStyle={{ color: '#faad14' }}
             />
           </Card>
         </Col>
       </Row>
 
-      {/* 项目列表 */}
-      {projects.length > 0 ? (
+      {/* 筛选和排序控件 */}
+      <Card style={{ marginBottom: 24 }}>
+        <Row gutter={16} justify="space-between" align="middle">
+          <Col flex="auto">
+            <Input.Search
+              placeholder="搜索执行中的项目..."
+              onSearch={value => setSearchQuery(value)}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{ width: '100%' }}
+              allowClear
+            />
+          </Col>
+          <Col>
+            <Select value={statusFilter} onChange={setStatusFilter} style={{ width: 160 }}>
+              <Option value="all">所有状态</Option>
+              <Option value="good">健康 (Green)</Option>
+              <Option value="warning">警告 (Yellow)</Option>
+              <Option value="danger">风险 (Red)</Option>
+            </Select>
+          </Col>
+          <Col>
+            <Select value={sortOrder} onChange={setSortOrder} style={{ width: 160 }}>
+              <Option value="health">按健康度排序</Option>
+              <Option value="name">按名称排序</Option>
+              <Option value="activity">按最近活动排序</Option>
+            </Select>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* 项目列表 - 更新为新卡片设计 */}
+      {filteredAndSortedProjects.length > 0 ? (
         <List
-          grid={{ gutter: 16, xs: 1, sm: 2, md: 2, lg: 3, xl: 4, xxl: 4 }}
-          dataSource={projects}
+          grid={{ gutter: 24, xs: 1, sm: 1, md: 2, lg: 3, xl: 3, xxl: 3 }}
+          dataSource={filteredAndSortedProjects}
           renderItem={(project) => {
             const healthConfig = getHealthStatusConfig(project.health_status || 'warning');
             return (
               <List.Item>
                 <Card
                   hoverable
-                  actions={[
-                    <Tooltip title="生成报告">
-                      <Button 
-                        type="text" 
-                        icon={<BarChartOutlined />} 
-                        onClick={() => handleGenerateReport(project)}
-                      >
-                        报告
-                      </Button>
-                    </Tooltip>,
-                    <Tooltip title="查看详情">
-                      <Button 
-                        type="text" 
-                        icon={<EyeOutlined />} 
-                        onClick={() => handleViewDetails(project)}
-                      >
-                        详情
-                      </Button>
-                    </Tooltip>,
-                    <Tooltip title="编辑项目">
-                      <Button 
-                        type="text" 
-                        icon={<EditOutlined />} 
-                        onClick={() => handleEdit(project)}
-                      >
-                        编辑
-                      </Button>
-                    </Tooltip>,
-                    <Tooltip title="同步数据">
-                      <Button 
-                        type="text" 
-                        icon={<SyncOutlined />} 
-                        onClick={() => handleSyncData(project)}
-                      >
-                        同步
-                      </Button>
-                    </Tooltip>,
-                    <Popconfirm
-                      title="确定要删除这个项目吗？"
-                      description="删除后无法恢复，相关文件将失去项目关联。"
-                      onConfirm={() => handleDeleteProject(project.id)}
-                      okText="确定"
-                      cancelText="取消"
-                    >
-                      <Tooltip title="删除项目">
-                        <Button 
-                          type="text" 
-                          danger 
-                          icon={<DeleteOutlined />}
-                        >
-                          删除
-                        </Button>
-                      </Tooltip>
-                    </Popconfirm>
-                  ]}
+                  style={{ position: 'relative' }}
                 >
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                      <Title level={4} style={{ margin: 0, flex: 1 }}>
-                        {project.project_name}
-                      </Title>
-                      <Badge 
-                        status={project.health_status === 'good' ? 'success' : project.health_status === 'warning' ? 'warning' : 'error'} 
-                        text={healthConfig.text}
-                      />
-                    </div>
-                    <Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0, color: '#666' }}>
-                      {project.description || '暂无描述'}
-                    </Paragraph>
-                  </div>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <Space wrap>
-                      <Tag color="blue">{project.status}</Tag>
-                      <Tag color="green">{projectStats[project.id] || 0} 个文件</Tag>
-                      {project.negative_keywords_count && project.negative_keywords_count > 0 && (
-                        <Tag color="red">{project.negative_keywords_count} 个负面关键词</Tag>
-                      )}
-                    </Space>
-                  </div>
-
-                  <div style={{ fontSize: '12px', color: '#999' }}>
-                    <div>创建时间：{new Date(project.created_at).toLocaleDateString()}</div>
-                    <div>更新时间：{new Date(project.updated_at).toLocaleDateString()}</div>
-                  </div>
+                  <Button 
+                    shape="circle"
+                    icon={<CloseOutlined />}
+                    size="small"
+                    style={{ position: 'absolute', top: 16, right: 16, border: 'none', background: 'transparent', zIndex: 10 }}
+                    onClick={() => showDeleteConfirm(project)}
+                  />
+                  <Space align="center" style={{ marginBottom: 24 }}>
+                    <Badge color={healthConfig.color} />
+                    <Title level={4} style={{ margin: 0, flex: 1 }} ellipsis={{ rows: 1, tooltip: project.project_name }}>
+                      {project.project_name}
+                    </Title>
+                  </Space>
+                  
+                  <Row gutter={16} style={{ marginBottom: 24, textAlign: 'center' }}>
+                    <Col span={8}>
+                      <Statistic value={project.total_files} title="总文件数" />
+                    </Col>
+                    <Col span={8}>
+                      <Statistic value={project.rework_rate} suffix="%" title="返工率" />
+                    </Col>
+                    <Col span={8}>
+                      <Statistic value={project.negative_keywords_count} title="负面关键词" />
+                    </Col>
+                  </Row>
+                  
+                  <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+                    <Button 
+                      icon={<SyncOutlined />} 
+                      onClick={() => handleSyncData(project)}
+                      loading={syncingProjectId === project.id}
+                    >
+                      {syncingProjectId === project.id ? '同步中...' : '同步数据'}
+                    </Button>
+                    <Button 
+                      type="primary"
+                      icon={<EyeOutlined />}
+                      onClick={() => handleViewDetails(project)}
+                    >
+                      查看详情
+                    </Button>
+                  </Space>
                 </Card>
               </List.Item>
             );
@@ -663,246 +589,112 @@ function ProjectsPage() {
       ) : (
         <Card>
           <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <Text type="secondary">暂无项目数据</Text>
+            <InfoCircleOutlined style={{ fontSize: 24, color: '#999', marginBottom: 16 }}/>
+            <Text type="secondary">当前筛选条件下没有找到项目</Text>
             <br />
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} style={{ marginTop: 16 }}>
-              添加第一个项目
+            <Button onClick={() => {
+              setSearchQuery('');
+              setStatusFilter('all');
+            }} style={{ marginTop: 16 }}>
+              清空筛选条件
             </Button>
           </div>
         </Card>
       )}
 
-      {/* 项目编辑/添加模态框 */}
+      {/* 项目编辑/添加模态框 (重构) */}
       <Modal
-        title={editingProject ? '编辑项目' : '添加项目'}
+        title={editingProject ? '编辑项目' : '新建项目'}
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={handleCancel}
         width={600}
-        okText="确定"
+        okText={editingProject ? '保存' : '创建项目'}
         cancelText="取消"
+        destroyOnClose
       >
         <Form
           form={form}
           layout="vertical"
-          initialValues={{
-            internal_chat_groups: [],
-            external_chat_groups: []
+          name="projectForm"
+          initialValues={{ 
+            project_name: editingProject?.project_name,
+            project_short_name: '', // 这里可以根据实际情况填充
+            description: editingProject?.description,
+            internal_chat_groups: editingProject?.internal_chat_groups || [],
+            external_chat_groups: editingProject?.external_chat_groups || [],
+            employee_ids: [], // 这里可以根据实际情况填充
           }}
         >
           <Form.Item
             name="project_name"
             label="项目名称"
-            rules={[{ required: true, message: '请输入项目名称' }]}
+            rules={[{ required: true, message: '项目名称不能为空' }]}
           >
-            <Input placeholder="请输入项目名称" />
+            <Input placeholder="请输入项目的完整名称" />
+          </Form.Item>
+
+          <Form.Item
+            name="project_short_name"
+            label="项目简称"
+            rules={[{ required: true, message: '项目简称不能为空' }]}
+            help="*此简称将用于聊天记录的自动匹配, 例如: 输入'良渚', 系统会自动匹配群名为'良渚-设计沟通群'的聊天记录。"
+          >
+            <Input placeholder="请输入项目简称 (用于内部识别, 建议使用拼音或英文)" />
           </Form.Item>
 
           <Form.Item
             name="description"
             label="项目描述"
           >
-            <Input.TextArea rows={3} placeholder="请输入项目描述" />
+            <Input.TextArea rows={3} placeholder="（选填）请输入项目描述" />
           </Form.Item>
 
           <Form.Item
             name="internal_chat_groups"
-            label="内部群聊"
+            label="关联内部群聊"
           >
             <Select
-              mode="tags"
-              placeholder="选择或输入内部群聊名称"
+              mode="multiple"
+              allowClear
+              placeholder="搜索或选择内部沟通群"
               options={chatGroups.map(group => ({ label: group, value: group }))}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
             />
           </Form.Item>
 
           <Form.Item
             name="external_chat_groups"
-            label="外部群聊"
+            label="关联外部群聊"
           >
             <Select
-              mode="tags"
-              placeholder="选择或输入外部群聊名称"
+              mode="multiple"
+              allowClear
+              placeholder="搜索或选择外部客户群"
               options={chatGroups.map(group => ({ label: group, value: group }))}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="employee_ids"
+            label="关联员工"
+          >
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="搜索或选择需要参与此项目的员工"
+              options={employees.map(emp => ({ label: emp.name, value: emp.id }))}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
             />
           </Form.Item>
         </Form>
-      </Modal>
-
-      {/* 同步数据模态框 */}
-      <Modal
-        title={`同步数据 - ${currentProject?.project_name}`}
-        open={syncModalVisible}
-        onCancel={() => setSyncModalVisible(false)}
-        width={800}
-        footer={[
-          <Button key="cancel" onClick={() => setSyncModalVisible(false)}>
-            关闭
-          </Button>,
-          <Button 
-            key="sync" 
-            type="primary" 
-            icon={<SyncOutlined />}
-            loading={syncLoading}
-            onClick={handleExecuteSync}
-            disabled={!syncStatus || syncStatus.status !== 'running'}
-          >
-            开始同步
-          </Button>
-        ]}
-      >
-        <div style={{ marginBottom: 24 }}>
-          {/* 同步状态 */}
-          {syncStatus && (
-            <Alert
-              message={`Chatlog 服务状态：${syncStatus.status === 'running' ? '正常运行' : '异常'}`}
-              description={syncStatus.message}
-              type={syncStatus.status === 'running' ? 'success' : 'error'}
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-          )}
-
-          {/* 同步表单 */}
-          <Form
-            form={syncForm}
-            layout="vertical"
-            initialValues={{
-              date_range: [dayjs().subtract(7, 'day'), dayjs()],
-              sync_type: 'all',
-              chatroom_names: []
-            }}
-          >
-            {/* 预设时间段选择 */}
-            <Form.Item
-              label="快速选择时间段"
-            >
-              <Select
-                placeholder="选择预设时间段或自定义"
-                onChange={handlePresetDateChange}
-                allowClear
-                style={{ marginBottom: 8 }}
-              >
-                {getPresetDateRanges().map(preset => (
-                  <Option key={preset.value} value={preset.value}>
-                    {preset.label}
-                  </Option>
-                ))}
-              </Select>
-            </Form.Item>
-
-            <Form.Item
-              name="date_range"
-              label="时间范围"
-              rules={[{ required: true, message: '请选择时间范围' }]}
-            >
-              <RangePicker 
-                style={{ width: '100%' }}
-                format="YYYY-MM-DD"
-                placeholder={['开始日期', '结束日期']}
-                showTime={false}
-                allowClear={true}
-              />
-            </Form.Item>
-
-            <Form.Item
-              name="sync_type"
-              label="同步类型"
-            >
-              <Select>
-                <Option value="all">全部数据</Option>
-                <Option value="chat">仅聊天记录</Option>
-                <Option value="files">仅文件数据</Option>
-              </Select>
-            </Form.Item>
-
-            <Form.Item
-              name="chatroom_names"
-              label="指定群聊（可选）"
-            >
-              <Select
-                mode="multiple"
-                placeholder="不选择则同步项目所有群聊"
-                options={chatGroups.map(group => ({ label: group, value: group }))}
-                showSearch
-                filterOption={(input, option) =>
-                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-                allowClear
-              />
-            </Form.Item>
-          </Form>
-        </div>
-
-        {/* 同步结果 */}
-        {syncResult && (
-          <div style={{ marginBottom: 24 }}>
-            <Divider>同步结果</Divider>
-            <Descriptions bordered size="small" column={2}>
-              <Descriptions.Item label="项目名称">{syncResult.project_name}</Descriptions.Item>
-              <Descriptions.Item label="时间范围">{syncResult.start_date} ~ {syncResult.end_date}</Descriptions.Item>
-              <Descriptions.Item label="目标群聊">{syncResult.total_chatrooms} 个</Descriptions.Item>
-              <Descriptions.Item label="成功群聊">{syncResult.success_count} 个</Descriptions.Item>
-              <Descriptions.Item label="失败群聊">{syncResult.failed_count} 个</Descriptions.Item>
-              <Descriptions.Item label="总消息数">{syncResult.total_messages} 条</Descriptions.Item>
-              <Descriptions.Item label="总文件数">{syncResult.total_files} 个</Descriptions.Item>
-              <Descriptions.Item label="同步时间">{new Date(syncResult.timestamp).toLocaleString()}</Descriptions.Item>
-            </Descriptions>
-
-            {/* 详细结果 */}
-            {syncResult.details.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <Text strong>详细结果：</Text>
-                <List
-                  size="small"
-                  dataSource={syncResult.details}
-                  renderItem={(detail) => (
-                    <List.Item key={detail.chatroom_name}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                        <Text>{detail.chatroom_name}</Text>
-                        <Space>
-                          {detail.status === 'success' ? (
-                            <>
-                              <Tag color="green" icon={<CheckCircleOutlined />}>成功</Tag>
-                              <Text type="secondary">{detail.message_count} 条消息</Text>
-                            </>
-                          ) : (
-                            <>
-                              <Tag color="red" icon={<CloseCircleOutlined />}>失败</Tag>
-                              <Text type="danger">{detail.error}</Text>
-                            </>
-                          )}
-                        </Space>
-                      </div>
-                    </List.Item>
-                  )}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 同步日志 */}
-        {syncLog.length > 0 && (
-          <div>
-            <Divider>同步日志</Divider>
-            <div style={{ 
-              maxHeight: 200, 
-              overflowY: 'auto', 
-              backgroundColor: '#f5f5f5', 
-              padding: 12, 
-              borderRadius: 4,
-              fontFamily: 'monospace',
-              fontSize: '12px'
-            }}>
-              {syncLog.map((log, index) => (
-                <div key={index} style={{ marginBottom: 4 }}>
-                  <Text type="secondary">[{new Date().toLocaleTimeString()}]</Text> {log}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </Modal>
     </div>
   );
