@@ -22,6 +22,117 @@ logger = logging.getLogger(__name__)
 # 初始化分析服务
 analysis_service = AnalysisService()
 
+@dashboard_bp.route('/overview', methods=['GET'])
+def get_dashboard_overview():
+    """
+    获取仪表盘总览数据
+    查询参数: start_date, end_date (可选)
+    返回: 总览统计数据
+    """
+    try:
+        # 获取查询参数
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # 构建查询条件
+        conditions = []
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                conditions.append(ChatMessage.timestamp >= start_dt)
+            except ValueError:
+                return jsonify({'success': False, 'error': '开始日期格式错误'}), 400
+        
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                conditions.append(ChatMessage.timestamp <= end_dt)
+            except ValueError:
+                return jsonify({'success': False, 'error': '结束日期格式错误'}), 400
+        
+        # 统计总消息数
+        total_messages_query = ChatMessage.query
+        if conditions:
+            total_messages_query = total_messages_query.filter(and_(*conditions))
+        total_messages = total_messages_query.count()
+        
+        # 统计总文件数
+        total_files_query = FileRecord.query
+        if start_date:
+            total_files_query = total_files_query.filter(FileRecord.upload_time >= start_dt)
+        if end_date:
+            total_files_query = total_files_query.filter(FileRecord.upload_time <= end_dt)
+        total_files = total_files_query.count()
+        
+        # 统计活跃员工数
+        active_employees_query = db.session.query(
+            func.count(func.distinct(ChatMessage.sender_name))
+        )
+        if conditions:
+            active_employees_query = active_employees_query.filter(and_(*conditions))
+        active_employees = active_employees_query.scalar()
+        
+        # 统计项目数
+        total_projects = Project.query.count()
+        
+        # 今日数据
+        today = datetime.now().date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        today_messages = ChatMessage.query.filter(
+            ChatMessage.timestamp >= today_start,
+            ChatMessage.timestamp <= today_end
+        ).count()
+        
+        today_files = FileRecord.query.filter(
+            FileRecord.upload_time >= today_start,
+            FileRecord.upload_time <= today_end
+        ).count()
+        
+        # 本周数据
+        week_start = today - timedelta(days=today.weekday())
+        week_end = week_start + timedelta(days=6)
+        week_start_dt = datetime.combine(week_start, datetime.min.time())
+        week_end_dt = datetime.combine(week_end, datetime.max.time())
+        
+        week_messages = ChatMessage.query.filter(
+            ChatMessage.timestamp >= week_start_dt,
+            ChatMessage.timestamp <= week_end_dt
+        ).count()
+        
+        week_files = FileRecord.query.filter(
+            FileRecord.upload_time >= week_start_dt,
+            FileRecord.upload_time <= week_end_dt
+        ).count()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'overview': {
+                    'total_messages': total_messages,
+                    'total_files': total_files,
+                    'active_employees': active_employees,
+                    'total_projects': total_projects
+                },
+                'today': {
+                    'messages': today_messages,
+                    'files': today_files
+                },
+                'this_week': {
+                    'messages': week_messages,
+                    'files': week_files
+                },
+                'period': {
+                    'start_date': start_date,
+                    'end_date': end_date
+                }
+            }
+        })
+    except Exception as e:
+        logger.error(f"获取仪表盘总览失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @dashboard_bp.route('/trends', methods=['GET'])
 def get_dashboard_trends():
     """

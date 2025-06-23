@@ -3,6 +3,7 @@
 # 整合所有数据处理逻辑，解决数据源混乱问题
 
 import logging
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from sqlalchemy import func, and_, or_
@@ -15,11 +16,16 @@ from models.file import FileRecord, FileVersion
 from models.chat import ChatMessage
 from models.keyword import KeywordCategory
 from models.workload import WorkloadRecord, WorkloadWeights
+from models.asset import Asset, AssetAnalysis  # 新增 Asset 模型导入
 from file_validator import FileNameValidator
 
 # 导入chatlog集成模块
 from chatlog_integration import ChatlogIntegration
 from chatlog_processor import ChatLogProcessor
+
+# 导入新的解析和分析服务
+from parser_service import ParserService
+from analysis_service import AnalysisService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +44,9 @@ class DataManager:
         """初始化数据管理器"""
         self.chatlog_integration = ChatlogIntegration()
         self.chatlog_processor = ChatLogProcessor()
+        # 初始化新的解析和分析服务
+        self.parser_service = ParserService()
+        self.analysis_service = AnalysisService()
         
     def sync_project_data(self, 
                          project_name: str,
@@ -182,7 +191,7 @@ class DataManager:
                     })
                     logger.error(f"同步群聊 {chatroom_name} 失败: {str(e)}")
             
-            # 5. 保存处理结果到数据库
+            # 5. 保存处理结果到数据库（使用新的 Asset 模型）
             if total_sync_results["file_records"] or total_sync_results["chat_messages"]:
                 self._save_sync_results(project, total_sync_results)
             
@@ -198,12 +207,11 @@ class DataManager:
             
             return {
                 'success': True,
-                'project_id': project.id,
-                'sync_result': total_sync_results
+                'data': total_sync_results
             }
             
         except Exception as e:
-            logger.error(f"同步项目 {project_name} 数据失败: {str(e)}")
+            logger.error(f"同步项目数据失败: {str(e)}")
             return {
                 'success': False,
                 'error': str(e)
@@ -258,80 +266,109 @@ class DataManager:
         return [emp.to_dict() for emp in employees]
     
     def _save_sync_results(self, project: Project, sync_result: Dict[str, Any]):
-        """保存同步结果到数据库，并自动生成工作量明细记录（WorkloadRecord）"""
+        """保存同步结果到数据库，使用新的 Asset 模型替代 FileRecord"""
         try:
-            # 初始化文件名验证器
-            file_name_validator = FileNameValidator()
-            # 保存文件记录，并自动生成工作量明细记录
+            # 保存文件记录到 Asset 表
             for file_data in sync_result.get('file_records', []):
-                file_record = FileRecord(
-                    original_name=file_data.get('original_name', ''),
-                    standardized_name=file_data.get('standardized_name', ''),
-                    project_name=file_data.get('project_name', ''),
-                    work_order=file_data.get('work_order', ''),
-                    workload=file_data.get('workload', ''),
-                    author_abbreviation=file_data.get('author_abbreviation', ''),
-                    version=file_data.get('version', ''),
-                    file_extension=file_data.get('file_extension', ''),
-                    upload_time=datetime.fromisoformat(file_data.get('upload_time', '')) if file_data.get('upload_time') else datetime.utcnow(),
-                    uploader=file_data.get('uploader', ''),
-                    file_size=file_data.get('file_size', 0),
-                    status=file_data.get('status', 'pending'),
-                    chatroom_name=file_data.get('chatroom_name', ''),
-                    message_seq=file_data.get('message_seq', ''),
-                    employee_id=file_data.get('employee_id')
-                )
-                db.session.add(file_record)
-
-                # ========== 自动生成工作量明细记录 ========== #
-                # 1. 解析文件名，获取产出类型、业务单位、数量等
+                # 使用 ParserService 解析文件名
                 filename = file_data.get('original_name', '')
-                validate_result = file_name_validator.validate_filename(filename)
-                parsed_info = validate_result.get('parsed_info', {}) if validate_result.get('is_compliant') else {}
-                # 2. 获取员工岗位
-                employee_id = file_data.get('employee_id')
-                employee = EmployeeMapping.query.get(employee_id) if employee_id else None
-                role = employee.role if employee else '未知'
-                # 3. 推断产出类型
-                output_type = '最终版-' + parsed_info.get('extension', '') if parsed_info else '其他'
-                # 4. 业务单位与数量
-                business_unit = None
-                quantity = 1.0
-                workload_str = parsed_info.get('workload') if parsed_info else None
-                if workload_str:
-                    # 简单提取单位和数量
-                    import re
-                    m = re.match(r'^(\d+)([a-zA-Z\u4e00-\u9fa5]*)$', workload_str)
-                    if m:
-                        quantity = float(m.group(1))
-                        business_unit = m.group(2) or None
-                # 5. 是否为最终版
-                is_final = True if '最终' in output_type or 'final' in output_type.lower() else False
-                # 6. 计算WE值（查找权重表）
-                we_value = 0.0
-                if role != '未知' and output_type != '其他' and business_unit:
-                    weight = WorkloadWeights.query.filter_by(role=role, output_type=output_type, business_unit=business_unit, is_final=is_final, is_active=True).first()
-                    if weight:
-                        we_value = weight.we_per_unit * quantity
-                # 7. 生成WorkloadRecord
-                workload_record = WorkloadRecord(
-                    employee_id=employee_id or None,
-                    project_id=project.id,
-                    date=file_record.upload_time.date() if file_record.upload_time else datetime.utcnow().date(),
-                    role=role,
-                    output_type=output_type,
-                    output_value=file_record.id,  # 产出内容标识，存文件ID
-                    we_value=we_value,
-                    is_final=is_final,
-                    is_iteration=False,  # 默认非迭代
-                    iteration_count=0,
-                    related_file_id=file_record.id,
-                    related_message_id=file_data.get('message_seq'),
-                    business_unit=business_unit,
-                    quantity=quantity,
-                    created_at=datetime.utcnow()
-                )
-                db.session.add(workload_record)
+                parsed_data = self.parser_service.parse(filename)
+                
+                if parsed_data:
+                    # 创建 Asset 记录
+                    asset = Asset(
+                        # 基础文件信息
+                        original_name=file_data.get('original_name', ''),
+                        file_path=file_data.get('file_path', ''),
+                        file_size=file_data.get('file_size', 0),
+                        file_md5=file_data.get('file_md5', ''),
+                        file_extension=parsed_data.file_extension or file_data.get('file_extension', ''),
+                        file_type=self._determine_file_type(parsed_data.file_extension),
+                        file_category=self._determine_file_category(parsed_data.file_extension),
+                        
+                        # 解析出的结构化元数据
+                        task_identifier=parsed_data.task_identifier,
+                        submission_date=parsed_data.submission_date,
+                        version=parsed_data.version,
+                        workload_amount=parsed_data.workload_amount,
+                        author_abbreviation=parsed_data.author_abbreviation,
+                        
+                        # 关联关系
+                        author_id=file_data.get('employee_id'),
+                        project_id=project.id,
+                        
+                        # 来源信息
+                        chatroom_name=file_data.get('chatroom_name', ''),
+                        message_seq=file_data.get('message_seq', ''),
+                        uploader=file_data.get('uploader', ''),
+                        upload_time=datetime.fromisoformat(file_data.get('upload_time', '')) if file_data.get('upload_time') else datetime.utcnow(),
+                        
+                        # 状态
+                        status='compliant' if parsed_data.is_compliant else 'non_compliant',
+                        tags=json.dumps({
+                            'project_name': parsed_data.project_name,
+                            'work_order': parsed_data.work_order
+                        }) if parsed_data.project_name or parsed_data.work_order else None
+                    )
+                    
+                    # 计算工作量当量 (WE)
+                    asset.workload_equivalent = self.analysis_service.calculate_workload_equivalent(asset)
+                    
+                    # 生成任务组ID
+                    asset.task_group_id = self.parser_service.generate_task_group_id(
+                        parsed_data.project_name or project.project_name,
+                        parsed_data.task_identifier,
+                        parsed_data.author_abbreviation
+                    )
+                    
+                    # 判断是否为最终版（简化逻辑）
+                    asset.is_final_version = 'final' in filename.lower() or '最终' in filename
+                    
+                    db.session.add(asset)
+                    
+                    # 同时保存到 FileRecord 以保持向后兼容
+                    file_record = FileRecord(
+                        original_name=file_data.get('original_name', ''),
+                        standardized_name=file_data.get('standardized_name', ''),
+                        project_name=file_data.get('project_name', ''),
+                        work_order=file_data.get('work_order', ''),
+                        workload=file_data.get('workload', ''),
+                        author_abbreviation=file_data.get('author_abbreviation', ''),
+                        version=file_data.get('version', ''),
+                        file_extension=file_data.get('file_extension', ''),
+                        upload_time=datetime.fromisoformat(file_data.get('upload_time', '')) if file_data.get('upload_time') else datetime.utcnow(),
+                        uploader=file_data.get('uploader', ''),
+                        file_size=file_data.get('file_size', 0),
+                        status=file_data.get('status', 'pending'),
+                        chatroom_name=file_data.get('chatroom_name', ''),
+                        message_seq=file_data.get('message_seq', ''),
+                        employee_id=file_data.get('employee_id')
+                    )
+                    db.session.add(file_record)
+                    
+                    # 自动生成工作量明细记录（保持原有逻辑）
+                    self._generate_workload_record(file_record, project, parsed_data)
+                else:
+                    # 解析失败的文件，仍然保存到 FileRecord
+                    logger.warning(f"文件名解析失败: {filename}")
+                    file_record = FileRecord(
+                        original_name=file_data.get('original_name', ''),
+                        standardized_name=file_data.get('standardized_name', ''),
+                        project_name=file_data.get('project_name', ''),
+                        work_order=file_data.get('work_order', ''),
+                        workload=file_data.get('workload', ''),
+                        author_abbreviation=file_data.get('author_abbreviation', ''),
+                        version=file_data.get('version', ''),
+                        file_extension=file_data.get('file_extension', ''),
+                        upload_time=datetime.fromisoformat(file_data.get('upload_time', '')) if file_data.get('upload_time') else datetime.utcnow(),
+                        uploader=file_data.get('uploader', ''),
+                        file_size=file_data.get('file_size', 0),
+                        status='non_compliant',
+                        chatroom_name=file_data.get('chatroom_name', ''),
+                        message_seq=file_data.get('message_seq', ''),
+                        employee_id=file_data.get('employee_id')
+                    )
+                    db.session.add(file_record)
             
             # 保存聊天消息
             for message_data in sync_result.get('chat_messages', []):
@@ -353,6 +390,107 @@ class DataManager:
             logger.error(f"保存同步结果失败: {str(e)}")
             db.session.rollback()
             raise
+    
+    def _determine_file_type(self, file_extension: str) -> str:
+        """根据文件扩展名确定文件类型"""
+        if not file_extension:
+            return 'other'
+        
+        extension = file_extension.lower()
+        
+        if extension in ['psd', 'ai', 'sketch', 'figma', 'xd']:
+            return 'design'
+        elif extension in ['doc', 'docx', 'txt', 'md']:
+            return 'copywriting'
+        elif extension in ['mp4', 'mov', 'avi', 'prproj']:
+            return 'video'
+        else:
+            return 'other'
+    
+    def _determine_file_category(self, file_extension: str) -> str:
+        """根据文件扩展名确定文件分类"""
+        if not file_extension:
+            return '其他'
+        
+        extension = file_extension.lower()
+        
+        if extension in ['psd', 'ai', 'sketch', 'figma', 'xd']:
+            return '设计稿'
+        elif extension in ['doc', 'docx', 'txt', 'md']:
+            return '文案'
+        elif extension in ['mp4', 'mov', 'avi', 'prproj']:
+            return '视频脚本'
+        else:
+            return '其他'
+    
+    def _generate_workload_record(self, file_record: FileRecord, project: Project, parsed_data):
+        """生成工作量明细记录（保持原有逻辑）"""
+        try:
+            # 初始化文件名验证器
+            file_name_validator = FileNameValidator()
+            
+            # 解析文件名，获取产出类型、业务单位、数量等
+            filename = file_record.original_name
+            validate_result = file_name_validator.validate_filename(filename)
+            parsed_info = validate_result.get('parsed_info', {}) if validate_result.get('is_compliant') else {}
+            
+            # 获取员工岗位
+            employee_id = file_record.employee_id
+            employee = EmployeeMapping.query.get(employee_id) if employee_id else None
+            role = employee.role if employee else '未知'
+            
+            # 推断产出类型
+            output_type = '最终版-' + parsed_info.get('extension', '') if parsed_info else '其他'
+            
+            # 业务单位与数量
+            business_unit = None
+            quantity = 1.0
+            workload_str = parsed_info.get('workload') if parsed_info else None
+            if workload_str:
+                import re
+                m = re.match(r'^(\d+)([a-zA-Z\u4e00-\u9fa5]*)$', workload_str)
+                if m:
+                    quantity = float(m.group(1))
+                    business_unit = m.group(2) or None
+            
+            # 是否为最终版
+            is_final = True if '最终' in output_type or 'final' in output_type.lower() else False
+            
+            # 计算WE值（查找权重表）
+            we_value = 0.0
+            if role != '未知' and output_type != '其他' and business_unit:
+                weight = WorkloadWeights.query.filter_by(
+                    role=role, 
+                    output_type=output_type, 
+                    business_unit=business_unit, 
+                    is_final=is_final, 
+                    is_active=True
+                ).first()
+                if weight:
+                    we_value = weight.we_per_unit * quantity
+            
+            # 生成WorkloadRecord
+            workload_record = WorkloadRecord(
+                employee_id=employee_id or None,
+                project_id=project.id,
+                date=file_record.upload_time.date() if file_record.upload_time else datetime.utcnow().date(),
+                role=role,
+                output_type=output_type,
+                output_value=file_record.id,
+                we_value=we_value,
+                is_final=is_final,
+                is_iteration=False,
+                iteration_count=0,
+                related_file_id=file_record.id,
+                related_message_id=file_record.message_seq,
+                business_unit=business_unit,
+                quantity=quantity,
+                created_at=datetime.utcnow()
+            )
+            db.session.add(workload_record)
+            
+        except Exception as e:
+            logger.error(f"生成工作量记录失败: {str(e)}")
     
     def _update_project_stats(self, project: Project):
         """更新项目统计信息"""

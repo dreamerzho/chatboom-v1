@@ -32,6 +32,7 @@ from models.project import Project, ProjectChatroom
 from models.file import FileRecord, FileVersion
 from models.chat import ChatMessage
 from models.keyword import KeywordCategory
+from models.asset import Asset, AssetAnalysis
 
 # 设置target_metadata用于自动生成迁移
 target_metadata = db.metadata
