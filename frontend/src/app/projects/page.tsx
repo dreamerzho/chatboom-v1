@@ -186,6 +186,11 @@ function ProjectsPage() {
   const [syncLog, setSyncLog] = useState<string[]>([]);
   const [currentSyncProject, setCurrentSyncProject] = useState<Project | null>(null);
 
+  // 1. 新增同步弹窗相关状态变量
+  const [syncModalVisible, setSyncModalVisible] = useState(false); // 控制同步确认弹窗显示
+  const [syncRange, setSyncRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null); // 同步时间区间
+  const [syncTargetProject, setSyncTargetProject] = useState<Project | null>(null); // 当前待同步的项目
+
   // 获取项目列表
   const fetchProjects = async () => {
     try {
@@ -394,12 +399,20 @@ function ProjectsPage() {
     });
   };
 
-  // 同步数据 (重构为使用流式响应和抽屉)
-  const handleSyncData = async (project: Project) => {
+  // 2. 修改同步按钮逻辑：点击后弹窗，确认后再发起同步
+  const handleSyncClick = (project: Project) => {
+    setSyncTargetProject(project);
+    // 默认时间区间：最近7天
+    setSyncRange([dayjs().subtract(7, 'day'), dayjs()]);
+    setSyncModalVisible(true);
+  };
+
+  // 3. 修改同步数据函数，接收时间段参数
+  const handleSyncData = async (project: Project, range: [dayjs.Dayjs, dayjs.Dayjs]) => {
     setSyncingProjectId(project.id);
     setCurrentSyncProject(project);
     setSyncDrawerVisible(true);
-    setSyncLog([`[${dayjs().format('HH:mm:ss')}] 开始为项目 "${project.project_name}" 同步最近7天的数据...`]);
+    setSyncLog([`[${dayjs().format('HH:mm:ss')}] 开始为项目 "${project.project_name}" 同步 ${range[0].format('YYYY-MM-DD')} ~ ${range[1].format('YYYY-MM-DD')} 的数据...`]);
     setSyncResult(null);
 
     try {
@@ -410,8 +423,8 @@ function ProjectsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          start_date: dayjs().subtract(7, 'day').format('YYYY-MM-DD'),
-          end_date: dayjs().format('YYYY-MM-DD'),
+          start_date: range[0].format('YYYY-MM-DD'),
+          end_date: range[1].format('YYYY-MM-DD'),
           sync_type: 'all',
           chatroom_names: [],
         }),
@@ -639,7 +652,7 @@ function ProjectsPage() {
                     <Tooltip title="同步数据">
                       <Button 
                         icon={<SyncOutlined />} 
-                        onClick={() => handleSyncData(project)}
+                        onClick={() => handleSyncClick(project)}
                         loading={syncingProjectId === project.id}
                       />
                     </Tooltip>
@@ -814,6 +827,40 @@ function ProjectsPage() {
           <Text type="secondary">同步完成后将在此处显示结果...</Text>
         )}
       </Drawer>
+
+      {/* 5. 新增同步确认弹窗 UI */}
+      <Modal
+        title={`同步数据 - ${syncTargetProject?.project_name || ''}`}
+        open={syncModalVisible}
+        onOk={() => {
+          if (syncTargetProject && syncRange) {
+            setSyncModalVisible(false);
+            handleSyncData(syncTargetProject, syncRange);
+          }
+        }}
+        onCancel={() => setSyncModalVisible(false)}
+        okText="开始同步"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 16 }}>
+          <span>请选择同步时间范围：</span>
+          <RangePicker
+            value={syncRange}
+            onChange={val => setSyncRange(val as [dayjs.Dayjs, dayjs.Dayjs])}
+            allowClear={false}
+            style={{ marginLeft: 8 }}
+            format="YYYY-MM-DD"
+            disabledDate={current => current && current > dayjs().endOf('day')}
+          />
+        </div>
+        <Alert
+          type="info"
+          showIcon
+          message="同步说明"
+          description="同步将根据所选时间段，抓取该项目关联群聊的所有聊天记录和文件。建议每次同步时间段不宜过长。"
+        />
+      </Modal>
     </div>
   );
 }

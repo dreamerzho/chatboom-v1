@@ -264,14 +264,14 @@ export const projectAPI = {
 
   // 更新项目
   updateProject: (id: number, projectData: any) =>
-    apiRequest(`/api/v1/projects/${id}/`, {
+    apiRequest(`/api/v1/projects/${id}`, {
       method: 'PUT',
       body: JSON.stringify(projectData),
     }),
 
   // 删除项目
   deleteProject: (id: number) =>
-    apiRequest(`/api/v1/projects/${id}/`, {
+    apiRequest(`/api/v1/projects/${id}`, {
       method: 'DELETE',
     }),
 };

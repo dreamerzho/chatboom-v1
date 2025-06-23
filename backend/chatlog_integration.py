@@ -62,24 +62,6 @@ class ChatlogIntegration:
         except Exception as e:
             logger.warning(f"初始化群聊映射失败: {e}")
 
-    def resolve_talker_id(self, talker: str) -> str:
-        """
-        优先用群聊ID，查不到降级用群聊名，支持多群聊合并（用&分隔）
-        """
-        if not talker:
-            return ''
-        talkers = [t.strip() for t in talker.split('&') if t.strip()]
-        resolved = []
-        for t in talkers:
-            # 优先用ID
-            if t in self.chatroom_name2id:
-                resolved.append(self.chatroom_name2id[t])
-            elif t in self.chatroom_id2name:
-                resolved.append(t)
-            else:
-                resolved.append(t)  # 兜底用原始名
-        return '&'.join(resolved)
-
     def get_chatlog_by_talker_and_time(self, 
                                      talker: str, 
                                      start_date: str, 
@@ -87,11 +69,11 @@ class ChatlogIntegration:
                                      format_type: str = "json",
                                      page_limit: int = 1000) -> List[Dict[str, Any]]:
         """
-        根据群聊名称和时间范围获取聊天记录，自动分页、ID适配、异常处理、去重
+        根据群聊昵称和时间范围获取聊天记录，自动分页、异常处理、去重
+        只允许用群昵称（chatroom_name）与 chatlog 聊天记录的 talker_name 字段做全等匹配
         """
         try:
-            # 自动适配群聊ID
-            resolved_talker = self.resolve_talker_id(talker)
+            # 直接用群昵称做参数
             time_range = f"{start_date}~{end_date}"
             offset = 0
             all_msgs = []
@@ -99,7 +81,7 @@ class ChatlogIntegration:
             while True:
                 params = {
                     "time": time_range,
-                    "talker": resolved_talker,
+                    "talker": talker,  # 只允许用群昵称
                     "format": format_type,
                     "limit": page_limit,
                     "offset": offset
@@ -271,44 +253,27 @@ class ChatlogIntegration:
                    format_type: str = "json") -> List[Dict[str, Any]]:
         """
         获取聊天记录 - 严格按照官方接口规范
-        
-        参数:
-            talker: 聊天对象标识（支持 wxid、群聊 ID、备注名、昵称等）
-            time_range: 时间范围，格式为 YYYY-MM-DD 或 YYYY-MM-DD~YYYY-MM-DD
-            limit: 返回记录数量限制
-            offset: 分页偏移量
-            format_type: 输出格式，支持 json、csv 或纯文本
-        
-        返回:
-            聊天记录列表
+        只允许用群昵称（chatroom_name）与 chatlog 聊天记录的 talker_name 字段做全等匹配
         """
         try:
-            # 构建查询参数 - 严格按照官方规范
             params = {
                 "limit": limit,
                 "offset": offset,
                 "format": format_type
             }
-            
             if talker:
-                params["talker"] = talker
-            
+                params["talker"] = talker  # 只允许用群昵称
             if time_range:
                 params["time"] = time_range
-            
-            # 构建完整的 URL
             url = f"{self.api_base}/api/v1/chatlog"
             logger.info(f"请求聊天记录: {url}，参数: {params}")
-            
             response = self.session.get(url, params=params)
-            
             if response.status_code == 200:
                 if format_type == "json":
                     data = response.json()
                     logger.info(f"成功获取聊天记录，数量: {len(data)}")
                     return data
                 else:
-                    # 对于非 JSON 格式，返回文本内容
                     return [{"content": response.text}]
             else:
                 logger.error(f"获取聊天记录失败，状态码: {response.status_code}，响应: {response.text}")
@@ -419,7 +384,7 @@ class ChatlogIntegration:
                 try:
                     # 获取每个群聊的最近聊天记录
                     chatlog = self.get_chatlog(
-                        talker=chatroom.get("id"),
+                        talker=chatroom.get("name"),
                         time_range=f"{datetime.now().strftime('%Y-%m-%d')}~{datetime.now().strftime('%Y-%m-%d')}",
                         limit=100
                     )
