@@ -127,34 +127,6 @@ function getRecommendedProject(person: UnmatchedPerson | null, projects: Project
     return projects.find(p => group_name.includes(p.project_name)) || null;
 }
 
-// --- 新增：临时模拟数据以供测试 ---
-const useMockData = true; // 设置为 true 以使用模拟数据，false则尝试连接API
-
-const mockEmployeeStats: EmployeeStat[] = [
-    { id: 1, wechat_nickname: 'zhangsan', real_name: '张三', position: '设计', name_abbreviation: 'zs', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=1', load_index: 15.7, avg_iteration: 2.1, projects: ['越城天地', '金陵中环'] },
-    { id: 2, wechat_nickname: 'wangwu', real_name: '王五', position: '设计', name_abbreviation: 'ww', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=2', load_index: 10.5, avg_iteration: 5.8, projects: ['SKP项目'] },
-    { id: 3, wechat_nickname: 'lisi', real_name: '李四', position: '文案', name_abbreviation: 'ls', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=3', load_index: 12.1, avg_iteration: 3.5, projects: ['越城天地', 'SKP项目'] },
-    { id: 4, wechat_nickname: 'zhaoliu', real_name: '赵六', position: 'PM', name_abbreviation: 'zl', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=4', load_index: 11, avg_iteration: 1.8, projects: ['越城天地', '金陵中环', 'SKP项目'] },
-    { id: 5, wechat_nickname: 'sunqi', real_name: '孙七', position: 'AE', name_abbreviation: 'sq', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=5', load_index: 14.2, avg_iteration: 2.9, projects: ['SKP项目', '金陵中环'] },
-    { id: 6, wechat_nickname: 'zhouba', real_name: '周八', position: '设计', name_abbreviation: 'zb', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=6', load_index: 9.8, avg_iteration: 3.1, projects: ['金陵中环'] },
-    { id: 7, wechat_nickname: 'wujiu', real_name: '吴九', position: '设计', name_abbreviation: 'wj', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=7', load_index: 18.1, avg_iteration: 2.4, projects: ['SKP项目', '越城天地'] },
-    { id: 8, wechat_nickname: 'zhengshi', real_name: '郑十', position: '文案', name_abbreviation: 'zs', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=8', load_index: 13.5, avg_iteration: 3.8, projects: ['金陵中环'] },
-    { id: 9, wechat_nickname: 'chenshiyi', real_name: '陈十一', position: 'PM', name_abbreviation: 'csy', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=9', load_index: 10.1, avg_iteration: 1.5, projects: ['SKP项目', '金陵中环'] },
-    { id: 10, wechat_nickname: 'fengshier', real_name: '冯十二', position: 'AE', name_abbreviation: 'fse', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=10', load_index: 11.8, avg_iteration: 2.2, projects: ['越城天地'] },
-    { id: 11, wechat_nickname: 'weishisan', real_name: '卫十三', position: '设计', name_abbreviation: 'wss', created_at: '', updated_at: '', avatar: 'https://i.pravatar.cc/150?img=11', load_index: 16.2, avg_iteration: 4.1, projects: ['SKP项目', '金陵中环', '越城天地'] },
-];
-
-const mockUnmatchedPersons: UnmatchedPerson[] = [
-    { id: 101, sender_name: '神秘客户A', group_name: '越城天地客户群', role: '未知', remark: '首次发言', created_at: '', updated_at: '' },
-    { id: 102, sender_name: '供应商-小李', group_name: '项目供应商沟通群', role: '未知', remark: '已对接', created_at: '', updated_at: '' },
-];
-
-const mockProjects: Project[] = [
-    { id: 1, project_name: 'SKP项目' },
-    { id: 2, project_name: '越城天地' },
-    { id: 3, project_name: '金陵中环' },
-];
-
 // 这是一个模拟函数，用于生成随机头像
 const getRandomAvatar = (name: string) => {
   // 使用一个简单的哈希算法将名字转换为一个数字，用于选择一个固定的头像
@@ -189,18 +161,6 @@ function EmployeesPage() {
       setLoading(true);
       setError(null);
       
-      if (useMockData) {
-        // --- 使用模拟数据 ---
-        setEmployees(mockEmployeeStats);
-        setEmployeeStats(mockEmployeeStats);
-        setFilteredEmployeeStats(mockEmployeeStats);
-        setUnmatchedPersons(mockUnmatchedPersons);
-        setProjects(mockProjects);
-        setLoading(false);
-        setUnmatchedLoading(false);
-        return;
-      }
-
       // --- 真实的API调用 ---
       // 并行获取员工列表和未匹配人员列表
       const [employeeRes, unmatchedRes, projectsRes] = await Promise.all([

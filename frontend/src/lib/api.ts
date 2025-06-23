@@ -203,16 +203,22 @@ async function apiRequest<T>(
 export const employeeAPI = {
   // 获取员工列表
   getEmployees: async () => {
-    const res = await apiRequest<{ items: EmployeeMapping[] }>('/api/v1/employees/');
-    // 兼容后端分页结构，始终返回items数组
-    if (res.success && res.data && Array.isArray(res.data.items)) {
-      return { ...res, data: res.data.items };
-    } else if (res.success && Array.isArray(res.data)) {
-      // 兼容老结构
-      return { ...res, data: res.data };
-    } else {
-      return { ...res, data: [] };
+    // 后端使用了分页，但我们在这里请求所有数据
+    const res = await apiRequest<any>('/api/v1/employees/?per_page=1000'); 
+    
+    // 兼容新旧两种后端返回格式
+    if (res.success && res.data) {
+      // 检查是否为分页格式
+      if (res.data.items && Array.isArray(res.data.items)) {
+        return { ...res, data: res.data.items };
+      }
+      // 兼容直接返回数组的旧格式
+      if (Array.isArray(res.data)) {
+        return { ...res, data: res.data };
+      }
     }
+    // 如果数据格式不正确或请求失败，返回空数组
+    return { ...res, data: [] };
   },
 
   // 添加员工
@@ -236,7 +242,7 @@ export const employeeAPI = {
 
   // 删除员工
   deleteEmployee: (id: number) =>
-    apiRequest(`/api/v1/employees/${id}`, {
+    apiRequest(`/api/v1/employees/${id}/`, {
       method: 'DELETE',
     }),
 };
@@ -245,37 +251,27 @@ export const employeeAPI = {
 export const projectAPI = {
   // 获取项目列表
   getProjects: async () => {
-    // 模拟网络延迟
-    await new Promise(resolve => setTimeout(resolve, 500));
-    // 实际项目中,这里会发起fetch请求
-    // return fetch('/api/v1/projects').then(res => res.json());
-    return createSuccessResponse(mockProjects);
+    const response = await apiRequest('/api/v1/projects/');
+    return response;
   },
 
-  // 添加项目
-  addProject: async (data: any) => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const newProject = {
-      ...data,
-      id: Math.max(...mockProjects.map(p => p.id)) + 1,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      status: 'active'
-    };
-    mockProjects.push(newProject);
-    return createSuccessResponse(newProject);
-  },
+  // 添加新项目
+  addProject: (projectData: any) =>
+    apiRequest('/api/v1/projects/', {
+      method: 'POST',
+      body: JSON.stringify(projectData),
+    }),
 
   // 更新项目
-  updateProject: (id: number, project: Partial<Project>) =>
-    apiRequest(`/api/v1/projects/${id}`, {
+  updateProject: (id: number, projectData: any) =>
+    apiRequest(`/api/v1/projects/${id}/`, {
       method: 'PUT',
-      body: JSON.stringify(project),
+      body: JSON.stringify(projectData),
     }),
 
   // 删除项目
   deleteProject: (id: number) =>
-    apiRequest(`/api/v1/projects/${id}`, {
+    apiRequest(`/api/v1/projects/${id}/`, {
       method: 'DELETE',
     }),
 };
@@ -342,17 +338,17 @@ export const dashboardAPI = {
 // 同步管理API
 export const syncAPI = {
   // 获取同步状态
-  getStatus: () => apiRequest<SyncStatus>('/api/v1/sync/status'),
+  getStatus: () => apiRequest<SyncStatus>('/api/v1/sync/status/'),
 
   // 获取群聊列表
-  getChatrooms: () => apiRequest<Chatroom[]>('/api/v1/sync/chatrooms'),
+  getChatrooms: () => apiRequest<Chatroom[]>('/api/v1/sync/chatrooms/'),
 
   // 测试 chatlog 连接
-  testConnection: () => apiRequest('/api/v1/sync/test'),
+  testConnection: () => apiRequest('/api/v1/sync/test/'),
 
   // 同步指定项目数据
   syncProject: (projectId: number, syncRequest: SyncRequest) =>
-    apiRequest<SyncResponse>(`/api/v1/sync/project/${projectId}`, {
+    apiRequest<SyncResponse>(`/api/v1/sync/project/${projectId}/`, {
       method: 'POST',
       body: JSON.stringify(syncRequest),
     }),
@@ -433,7 +429,7 @@ export const unmatchedAPI = {
   },
   // 修改未匹配人员角色/备注
   updateUnmatchedPerson: (id: number, data: Partial<UnmatchedPerson>) =>
-    apiRequest(`/api/v1/unmatched/${id}`, {
+    apiRequest(`/api/v1/unmatched/${id}/`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),

@@ -9,12 +9,21 @@
 import re
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from difflib import SequenceMatcher
+import json
+import os
+from models.project import Project
 from models.unmatched_person import UnmatchedPerson
+from models.file import FileRecord
+from models.chat import ChatMessage
+from models.employee import EmployeeMapping
 from db import db
 
 logger = logging.getLogger(__name__)
+
+# 定义聊天记录文件存放的基础路径
+CHATLOG_BASE_PATH = os.path.join(os.path.dirname(__file__), '..', 'basefiles')
 
 class ChatMessageParser:
     """
@@ -125,55 +134,217 @@ class ChatLogProcessor:
     负责对整个聊天记录列表进行处理，包括去重、关联等
     """
     
-    def __init__(self):
-        """初始化处理器"""
+    def __init__(self, project_id: int, date_str: Optional[str] = None, yield_log: Optional[Callable[[str], None]] = None):
+        """
+        初始化处理器
+        :param project_id: 要处理的项目ID
+        :param date_str: 要处理的特定日期 (YYYYMMDD)，如果为None则处理所有
+        :param yield_log: 用于流式返回日志的回调函数
+        """
         self.parser = ChatMessageParser()
-        self.processed_seqs = set()  # 已处理的消息序列号
+        self.project_id = project_id
+        self.date_str = date_str
+        self.yield_log = yield_log or (lambda msg: logger.info(msg))
+        self.employees = self._load_employees()
+
+    def _log(self, message: str):
+        """记录并可能发送日志"""
+        logger.info(message)
+        if self.yield_log:
+            self.yield_log(message)
+
+    def _load_employees(self) -> List[Dict[str, Any]]:
+        """从数据库加载员工映射信息"""
+        self._log("正在从数据库加载员工信息...")
+        employees = EmployeeMapping.query.all()
+        employee_list = [
+            {
+                'id': emp.id,
+                'wechat_nickname': emp.wechat_nickname,
+                'real_name': emp.real_name,
+                'name_abbreviation': emp.name_abbreviation,
+                'position': emp.position
+            }
+            for emp in employees
+        ]
+        self._log(f"成功加载 {len(employee_list)} 条员工信息。")
+        return employee_list
+
+    def get_chatlog_filenames(self) -> Dict[str, List[str]]:
+        """根据项目ID获取对应的聊天记录文件名"""
+        project = Project.query.get(self.project_id)
+        if not project:
+            self._log(f"错误：找不到ID为 {self.project_id} 的项目。")
+            return {}
+
+        self._log(f"开始为项目 '{project.project_name}' 查找聊天记录文件...")
         
-    def _associate_employee(self, sender_name: str, employees: List[Dict[str, Any]], group_type: str = 'unknown') -> Tuple[Optional[Dict], str]:
+        # 严格按 chatrooms 结构分类
+        chatrooms = getattr(project, 'chatrooms', [])
+        internal_chat_groups = [c.chatroom_name for c in chatrooms if getattr(c, 'chatroom_type', '') == '内部群聊']
+        external_chat_groups = [c.chatroom_name for c in chatrooms if getattr(c, 'chatroom_type', '') == '外部群聊']
+        chat_groups = {
+            'internal': internal_chat_groups,
+            'external': external_chat_groups
+        }
+        
+        filenames = {'internal': [], 'external': []}
+        
+        # 确保基础路径存在
+        if not os.path.isdir(CHATLOG_BASE_PATH):
+            self._log(f"错误：聊天记录基础路径 {CHATLOG_BASE_PATH} 不存在或不是一个目录。")
+            return {}
+
+        all_files = [f for f in os.listdir(CHATLOG_BASE_PATH) if f.endswith('.txt')]
+        self._log(f"在 {CHATLOG_BASE_PATH} 中找到 {len(all_files)} 个 .txt 文件。")
+
+        for group_type, groups in chat_groups.items():
+            for group_name in groups:
+                found = False
+                for filename in all_files:
+                    if group_name in filename:
+                        filenames[group_type].append(filename)
+                        self._log(f"  - 匹配成功 ({group_type}): 群聊 '{group_name}' -> 文件 '{filename}'")
+                        found = True
+                if not found:
+                     self._log(f"  - 匹配失败 ({group_type}): 未找到与群聊 '{group_name}' 相关的文件。")
+
+        return filenames
+
+    def load_and_parse_chatlog_file(self, filename: str) -> List[Dict[str, Any]]:
+        """加载并解析单个聊天记录文件"""
+        full_path = os.path.join(CHATLOG_BASE_PATH, filename)
+        self._log(f"正在读取文件: {full_path}")
+        
+        try:
+            with open(full_path, 'r', encoding='utf-8') as f:
+                # 假设文件内容是JSON数组
+                data = json.load(f)
+                if isinstance(data, list):
+                    self._log(f"文件 '{filename}' 读取成功，包含 {len(data)} 条记录。")
+                    return data
+                else:
+                    self._log(f"文件 '{filename}' 格式错误：内容不是一个JSON列表。")
+                    return []
+        except FileNotFoundError:
+            self._log(f"错误：文件不存在 {full_path}")
+            return []
+        except json.JSONDecodeError as e:
+            self._log(f"错误：解析文件 {filename} JSON失败: {e}")
+            return []
+        except Exception as e:
+            self._log(f"错误：读取文件 {filename} 时发生未知错误: {e}")
+            return []
+
+    def process_chatlogs(self) -> Dict[str, Any]:
         """
-        将发件人姓名与员工列表进行模糊匹配
-        支持内部/外部群的角色区分
+        主处理流程
+        1. 获取文件名 -> 2. 读取文件 -> 3. 解析和处理 -> 4. 保存到数据库
         """
-        if not sender_name or not employees:
+        self._log(f"--- 开始处理项目ID: {self.project_id} 的聊天记录 ---")
+        filenames_by_type = self.get_chatlog_filenames()
+
+        if not any(filenames_by_type.values()):
+            self._log("未找到任何相关的聊天记录文件，处理中止。")
+            return {"success": False, "message": "未找到相关的聊天记录文件"}
+        
+        all_messages = []
+        all_files = []
+
+        for group_type, filenames in filenames_by_type.items():
+            for filename in filenames:
+                chatlog_data = self.load_and_parse_chatlog_file(filename)
+                if not chatlog_data:
+                    continue
+
+                group_info = {'type': group_type, 'name': os.path.splitext(filename)[0]}
+                
+                processed_data = self.process_and_deduplicate(chatlog_data, group_info)
+                
+                messages_to_add = processed_data.get('chat_messages', [])
+                files_to_add = processed_data.get('file_records', [])
+
+                self._log(f"文件 '{filename}' 处理完成: 新增消息 {len(messages_to_add)}, 新增文件 {len(files_to_add)}")
+
+                all_messages.extend(messages_to_add)
+                all_files.extend(files_to_add)
+
+        # 批量保存到数据库
+        try:
+            if all_messages:
+                db.session.bulk_insert_mappings(ChatMessage, all_messages)
+                self._log(f"准备向数据库批量插入 {len(all_messages)} 条消息记录...")
+            
+            if all_files:
+                db.session.bulk_insert_mappings(FileRecord, all_files)
+                self._log(f"准备向数据库批量插入 {len(all_files)} 条文件记录...")
+
+            if all_messages or all_files:
+                db.session.commit()
+                self._log("数据已成功提交到数据库。")
+            else:
+                self._log("没有新的数据需要提交到数据库。")
+                
+        except Exception as e:
+            db.session.rollback()
+            self._log(f"数据库操作失败: {e}")
+            return {"success": False, "message": f"数据库操作失败: {e}"}
+
+        summary = {
+            "total_new_messages": len(all_messages),
+            "total_new_files": len(all_files)
+        }
+        self._log(f"--- 项目ID: {self.project_id} 处理完成。总结: {summary} ---")
+        return {"success": True, "summary": summary}
+    
+    def _associate_employee(self, sender_name: str, group_type: str = 'unknown') -> Tuple[Optional[int], str]:
+        if not sender_name:
             return None, 'unknown'
 
-        best_match = None
+        best_match_employee = None
         highest_score = 0.6  # 相似度阈值
 
-        for employee in employees:
+        for employee in self.employees:
             # 获取员工的各种名称进行匹配
             wechat_nickname = employee.get('wechat_nickname', '')
             real_name = employee.get('real_name', '')
-            name_abbreviation = employee.get('name_abbreviation', '')
             
-            # 计算相似度
-            scores = []
+            # 完全匹配优先
+            if sender_name == wechat_nickname or sender_name == real_name:
+                 best_match_employee = employee
+                 break
+
+            # 模糊匹配
+            score1 = SequenceMatcher(None, sender_name, wechat_nickname).ratio() if wechat_nickname else 0
+            score2 = SequenceMatcher(None, sender_name, real_name).ratio() if real_name else 0
             
-            if wechat_nickname:
-                scores.append(SequenceMatcher(None, sender_name, wechat_nickname).ratio())
-            
-            if real_name:
-                scores.append(SequenceMatcher(None, sender_name, real_name).ratio())
-            
-            if name_abbreviation:
-                scores.append(SequenceMatcher(None, sender_name, name_abbreviation).ratio())
-            
-            # 取最高分
-            if scores:
-                max_score = max(scores)
-                if max_score > highest_score:
-                    highest_score = max_score
-                    best_match = employee
+            max_score = max(score1, score2)
+            if max_score > highest_score:
+                highest_score = max_score
+                best_match_employee = employee
         
-        if best_match:
-            return best_match, 'employee'
+        if best_match_employee:
+            return best_match_employee.get('id'), 'employee'
         
         # 如果是在外部群且没匹配到员工，则认为是客户
         if group_type == 'external':
-            return {'name': sender_name, 'role': '外部客户'}, 'client'
+            return None, 'client'
             
+        # 记录未匹配到的人员
+        self._record_unmatched_person(sender_name, group_type)
         return None, 'unmatched'
+
+    def _record_unmatched_person(self, sender_name: str, group_name: str):
+        """记录未匹配到的人员到数据库，避免重复记录"""
+        exists = UnmatchedPerson.query.filter_by(sender_name=sender_name, group_name=group_name).first()
+        if not exists:
+            try:
+                new_person = UnmatchedPerson(sender_name=sender_name, group_name=group_name, role='unknown')
+                db.session.add(new_person)
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"记录未匹配人员 '{sender_name}' 到数据库失败: {e}")
 
     def _parse_filename_components(self, filename: str) -> Dict[str, str]:
         """
@@ -238,7 +409,7 @@ class ChatLogProcessor:
         ext_match = re.search(r'\.([a-zA-Z0-9]+)$', filename)
         return ext_match.group(1).lower() if ext_match else ''
 
-    def _create_file_record(self, parsed_message: Dict[str, Any], employee: Optional[Dict], role: str, group_info: Dict) -> Optional[Dict]:
+    def _create_file_record(self, parsed_message: Dict[str, Any], employee_id: Optional[int], role: str, group_info: Dict) -> Optional[Dict]:
         """
         创建文件记录
         """
@@ -248,195 +419,88 @@ class ChatLogProcessor:
         if not filename:
             return None
 
-        # 解析文件名组件
-        filename_components = self._parse_filename_components(filename)
+        components = self._parse_filename_components(filename)
         
-        # 确定项目名称（优先使用解析出的，否则使用群聊信息）
-        project_name = filename_components['project_name']
-        if not project_name or project_name == '未知项目':
-            project_name = group_info.get('project_name', '未知项目')
+        timestamp = datetime.fromtimestamp(parsed_message.get('time', 0))
 
         return {
-            'original_name': filename,
-            'standardized_name': filename,  # 可以后续标准化
-            'project_name': project_name,
-            'work_order': filename_components['work_order'],
-            'workload': filename_components['workload'],
-            'author_abbreviation': filename_components['author_abbreviation'],
-            'version': filename_components['version'],
-            'file_extension': filename_components['extension'],
-            'upload_time': parsed_message.get('time'),
-            'uploader': parsed_message.get('sender_name'),
-            'file_size': '0',  # 暂时设为0，后续可以从content中提取
-            'status': 'pending',
-            'employee_id': employee.get('id') if employee and role == 'employee' else None,
-            'chatroom_name': group_info.get('chatroom_name'),
-            'message_seq': parsed_message.get('seq'),
-            'is_standard_format': filename_components['is_standard_format'],
-            'sender_role': role,
-            'group_type': group_info.get('group_type', 'unknown')
+            'project_id': self.project_id,
+            'filename': filename,
+            'uploader_id': employee_id,
+            'uploader_role': role,
+            'upload_time': timestamp,
+            'file_type': components.get('extension'),
+            'group_name': group_info.get('name'),
+            'group_type': group_info.get('type'),
+            'is_standard_format': components.get('is_standard_format'),
+            'parsed_project_name': components.get('project_name'),
+            'parsed_date': components.get('date'),
+            'parsed_author_abbreviation': components.get('author_abbreviation'),
+            'parsed_version': components.get('version'),
         }
 
-    def _create_chat_message(self, parsed_message: Dict[str, Any], employee: Optional[Dict], role: str) -> Dict[str, Any]:
+    def _create_chat_message(self, parsed_message: Dict[str, Any], employee_id: Optional[int], role: str) -> Dict[str, Any]:
         """
         创建聊天消息记录
         """
+        timestamp = datetime.fromtimestamp(parsed_message.get('time', 0))
+
         return {
-            'seq': parsed_message.get('seq'),  # 使用seq字段，与数据库模型保持一致
-            'time': parsed_message.get('time'),
-            'talker': parsed_message.get('talker'),
-            'talker_name': parsed_message.get('talker_name'),
-            'sender': parsed_message.get('sender'),
-            'sender_name': parsed_message.get('sender_name'),
-            'is_self': parsed_message.get('is_self', False),
-            'type': parsed_message.get('type'),
-            'sub_type': parsed_message.get('sub_type', 0),
-            'content': parsed_message.get('parsed_content', {}).get('text', ''),
-            'employee_id': employee.get('id') if employee and role == 'employee' else None,
-            'sender_role': role
+            'project_id': self.project_id,
+            'message_seq': parsed_message.get('seq'),
+            'message_time': timestamp,
+            'sender_id': employee_id,
+            'sender_role': role,
+            'sender_nickname': parsed_message.get('sender_name'),
+            'group_name': parsed_message.get('talker_name'),
+            'message_type': parsed_message.get('parsed_content', {}).get('type', '未知'),
+            'content': json.dumps(parsed_message.get('parsed_content', {}), ensure_ascii=False)
         }
 
     def process_and_deduplicate(self, 
                        chatlog: List[Dict[str, Any]], 
-                       employees: List[Dict[str, Any]],
                        group_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        处理聊天记录并去重 - 群聊类型与角色区分增强版
-        
-        参数:
-            chatlog: 原始聊天记录列表
-            employees: 员工列表（用于匹配）
-            group_info: 群聊信息 {'chatroom_name': '群名', 'project_name': '项目名', 'group_type': 'internal/external'}
-        
-        返回:
-            处理结果
+        处理聊天记录，包括解析、关联、去重
         """
-        try:
-            # 设置默认群聊信息（已强制要求传入，不再自动补全）
-            if not group_info or 'group_type' not in group_info:
-                raise ValueError('group_info参数必须包含group_type')
+        new_messages = []
+        new_files = []
+        
+        # 首先检查数据库中已存在的seq
+        seqs_in_log = [msg.get('seq') for msg in chatlog if msg.get('seq')]
+        if seqs_in_log:
+            existing_seqs = db.session.query(ChatMessage.message_seq).filter(
+                ChatMessage.project_id == self.project_id,
+                ChatMessage.message_seq.in_(seqs_in_log)
+            ).all()
+            processed_seqs = {seq[0] for seq in existing_seqs}
+            self._log(f"在数据库中找到 {len(processed_seqs)} 条已存在的记录，将跳过处理。")
+        else:
+            processed_seqs = set()
+
+        for message in chatlog:
+            seq = message.get('seq')
+            if not seq or seq in processed_seqs:
+                continue
+
+            parsed_message = self.parser.parse_message(message)
+            sender_name = parsed_message.get('sender_name')
             
-            result = {
-                'total_messages': len(chatlog),
-                'processed_messages': 0,
-                'duplicate_messages': 0,
-                'file_messages': 0,
-                'text_messages': 0,
-                'other_messages': 0,
-                'matched_employees': 0,
-                'unmatched_employees': 0,
-                'client_messages': 0,
-                'parsed_messages': [],
-                'file_records': [],
-                'chat_messages': [],
-                'employee_stats': {},
-                'errors': []
-            }
+            employee_id, role = self._associate_employee(sender_name, group_info['type'])
+
+            # 创建聊天消息记录
+            chat_record = self._create_chat_message(parsed_message, employee_id, role)
+            new_messages.append(chat_record)
             
-            for message in chatlog:
-                try:
-                    # 检查是否已处理过（去重）
-                    seq = message.get('seq')
-                    if seq in self.processed_seqs:
-                        result['duplicate_messages'] += 1
-                        continue
-                    
-                    self.processed_seqs.add(seq)
-                    result['processed_messages'] += 1
-                    
-                    # 解析消息
-                    parsed_message = self.parser.parse_message(message)
-                    
-                    # 匹配员工
-                    matched_employee, role = self._associate_employee(
-                        parsed_message['sender_name'], 
-                        employees,
-                        group_info.get('group_type', 'unknown')
-                    )
-                    
-                    if role == 'employee':
-                        result['matched_employees'] += 1
-                        # 统计员工消息数量
-                        emp_id = matched_employee['id']
-                        if emp_id not in result['employee_stats']:
-                            result['employee_stats'][emp_id] = {
-                                'employee': matched_employee,
-                                'message_count': 0,
-                                'file_count': 0
-                            }
-                        result['employee_stats'][emp_id]['message_count'] += 1
-                    elif role == 'client':
-                        result['client_messages'] += 1
-                    else:
-                        result['unmatched_employees'] += 1
-                        # 记录未匹配人员到数据库
-                        try:
-                            unmatched = UnmatchedPerson.query.filter_by(
-                                sender_name=parsed_message['sender_name'],
-                                group_name=group_info.get('chatroom_name', '未知群聊')
-                            ).first()
-                            if not unmatched:
-                                unmatched = UnmatchedPerson(
-                                    sender_name=parsed_message['sender_name'],
-                                    group_name=group_info.get('chatroom_name', '未知群聊'),
-                                    role='未知',
-                                    remark='自动记录，未匹配为员工'
-                                )
-                                db.session.add(unmatched)
-                                db.session.commit()
-                        except Exception as e:
-                            logger.error(f"记录未匹配人员失败: {str(e)}")
-                    
-                    # 统计消息类型
-                    msg_type = parsed_message.get('type')
-                    if msg_type == 49 and parsed_message.get('parsed_content', {}).get('filename'):
-                        result['file_messages'] += 1
-                        if matched_employee and role == 'employee':
-                            emp_id = matched_employee['id']
-                            result['employee_stats'][emp_id]['file_count'] += 1
-                        
-                        # 创建文件记录
-                        file_record = self._create_file_record(parsed_message, matched_employee, role, group_info)
-                        if file_record:
-                            result['file_records'].append(file_record)
-                    
-                    elif msg_type == 1:
-                        result['text_messages'] += 1
-                    else:
-                        result['other_messages'] += 1
-                    
-                    # 创建聊天消息记录
-                    chat_message = self._create_chat_message(parsed_message, matched_employee, role)
-                    result['chat_messages'].append(chat_message)
-                    
-                    result['parsed_messages'].append(parsed_message)
-                    
-                except Exception as e:
-                    error_msg = f"处理消息失败: {str(e)}, seq: {message.get('seq')}"
-                    logger.error(error_msg)
-                    result['errors'].append(error_msg)
+            # 如果是文件，创建文件记录
+            if parsed_message.get('parsed_content', {}).get('filename'):
+                file_record = self._create_file_record(parsed_message, employee_id, role, group_info)
+                if file_record:
+                    new_files.append(file_record)
             
-            logger.info(f"聊天记录处理完成："
-                       f"总消息 {result['total_messages']} 条，"
-                       f"处理 {result['processed_messages']} 条，"
-                       f"文件 {result['file_messages']} 个，"
-                       f"去重 {result['duplicate_messages']} 条，"
-                       f"员工匹配 {result['matched_employees']} 个，"
-                       f"客户消息 {result['client_messages']} 条")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"处理聊天记录失败: {str(e)}")
-            return {
-                'error': str(e),
-                'total_messages': len(chatlog),
-                'processed_messages': 0,
-                'file_records': [],
-                'chat_messages': []
-            }
-    
-    def clear_processed_seqs(self):
-        """清空已处理的消息序列号（用于重新同步）"""
-        self.processed_seqs.clear()
-        logger.info("已清空处理记录，可以重新同步") 
+            processed_seqs.add(seq)
+
+        return {
+            "chat_messages": new_messages,
+            "file_records": new_files
+        } 

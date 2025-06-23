@@ -43,175 +43,41 @@ class DataManager:
     def __init__(self):
         """初始化数据管理器"""
         self.chatlog_integration = ChatlogIntegration()
-        self.chatlog_processor = ChatLogProcessor()
+        # self.chatlog_processor = ChatLogProcessor() # 已废弃，改为动态创建
         # 初始化新的解析和分析服务
         self.parser_service = ParserService()
         self.analysis_service = AnalysisService()
         
-    def sync_project_data(self, 
-                         project_name: str,
-                         chatroom_names: List[str],
-                         start_date: str,
-                         end_date: str,
-                         force_resync: bool = False) -> Dict[str, Any]:
+    def sync_project_data(self,
+                          project_id: int,
+                          force_resync: bool = False) -> Dict[str, Any]:
         """
-        同步项目数据（统一入口）
-        
-        参数:
-            project_name: 项目名称
-            chatroom_names: 群聊名称列表
-            start_date: 起始日期
-            end_date: 结束日期
-            force_resync: 是否强制重新同步
-        
-        返回:
-            同步结果
+        同步项目数据（统一入口）- 已重构
+        此方法现在是 chatlog_integration.sync_project_chatlogs 的一个简单代理
         """
         try:
-            logger.info(f"开始同步项目 {project_name} 的数据")
+            logger.info(f"DataManager: 开始为项目ID {project_id} 调用同步流程...")
+
+            # 完全委托给 chatlog_integration 来处理
+            sync_result = self.chatlog_integration.sync_project_chatlogs(
+                project_id=project_id,
+                force_resync=force_resync
+            )
             
-            # 1. 获取或创建项目
-            project = self._get_or_create_project(project_name)
-            
-            # 2. 获取员工映射数据
-            employees = self._get_employee_mappings()
-            
-            # 3. 如果强制重新同步，清空已处理记录
-            if force_resync:
-                self.chatlog_processor.clear_processed_seqs()
-                logger.info("强制重新同步，清空已处理的消息序列号")
-            
-            # 4. 同步每个群聊的数据
-            total_sync_results = {
-                'project_name': project_name,
-                'start_date': start_date,
-                'end_date': end_date,
-                'total_chatrooms': len(chatroom_names),
-                'success_count': 0,
-                'failed_count': 0,
-                'total_messages': 0,
-                'processed_messages': 0,
-                'duplicate_messages': 0,
-                'file_messages': 0,
-                'text_messages': 0,
-                'matched_employees': 0,
-                'unmatched_employees': 0,
-                'client_messages': 0,
-                'file_records': [],
-                'chat_messages': [],
-                'employee_stats': {},
-                'details': [],
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            for chatroom_name in chatroom_names:
-                try:
-                    logger.info(f"正在同步群聊: {chatroom_name}")
-                    
-                    # 获取该群聊的聊天记录
-                    chatlog = self.chatlog_integration.get_chatlog_by_talker_and_time(
-                        talker=chatroom_name,
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-                    
-                    if chatlog:
-                        # 确定群聊类型（内部/外部）
-                        group_type = self._determine_group_type(chatroom_name, project_name)
-                        
-                        # 设置群聊信息
-                        group_info = {
-                            'chatroom_name': chatroom_name,
-                            'project_name': project_name,
-                            'group_type': group_type
-                        }
-                        
-                        # 使用新的处理器解析聊天记录
-                        processed_result = self.chatlog_processor.process_and_deduplicate(
-                            chatlog, 
-                            employees, 
-                            group_info
-                        )
-                        
-                        # 更新统计信息
-                        total_sync_results["success_count"] += 1
-                        total_sync_results["total_messages"] += processed_result.get("total_messages", 0)
-                        total_sync_results["processed_messages"] += processed_result.get("processed_messages", 0)
-                        total_sync_results["duplicate_messages"] += processed_result.get("duplicate_messages", 0)
-                        total_sync_results["file_messages"] += processed_result.get("file_messages", 0)
-                        total_sync_results["text_messages"] += processed_result.get("text_messages", 0)
-                        total_sync_results["matched_employees"] += processed_result.get("matched_employees", 0)
-                        total_sync_results["unmatched_employees"] += processed_result.get("unmatched_employees", 0)
-                        total_sync_results["client_messages"] += processed_result.get("client_messages", 0)
-                        
-                        # 收集文件记录和聊天消息
-                        total_sync_results["file_records"].extend(processed_result.get("file_records", []))
-                        total_sync_results["chat_messages"].extend(processed_result.get("chat_messages", []))
-                        
-                        # 合并员工统计
-                        for emp_id, emp_stats in processed_result.get("employee_stats", {}).items():
-                            if emp_id not in total_sync_results["employee_stats"]:
-                                total_sync_results["employee_stats"][emp_id] = emp_stats
-                            else:
-                                total_sync_results["employee_stats"][emp_id]["message_count"] += emp_stats["message_count"]
-                                total_sync_results["employee_stats"][emp_id]["file_count"] += emp_stats["file_count"]
-                        
-                        total_sync_results["details"].append({
-                            "chatroom_name": chatroom_name,
-                            "group_type": group_type,
-                            "message_count": processed_result.get("processed_messages", 0),
-                            "file_count": processed_result.get("file_messages", 0),
-                            "duplicate_count": processed_result.get("duplicate_messages", 0),
-                            "matched_employees": processed_result.get("matched_employees", 0),
-                            "unmatched_employees": processed_result.get("unmatched_employees", 0),
-                            "client_messages": processed_result.get("client_messages", 0),
-                            "status": "success",
-                            "first_message_time": chatlog[0]["time"] if chatlog else None,
-                            "last_message_time": chatlog[-1]["time"] if chatlog else None
-                        })
-                        
-                        logger.info(f"成功同步群聊 {chatroom_name}，处理 {processed_result.get('processed_messages', 0)} 条消息，"
-                                  f"文件 {processed_result.get('file_messages', 0)} 个，"
-                                  f"去重 {processed_result.get('duplicate_messages', 0)} 条")
-                    else:
-                        total_sync_results["details"].append({
-                            "chatroom_name": chatroom_name,
-                            "message_count": 0,
-                            "status": "success",
-                            "note": "无聊天记录"
-                        })
-                        logger.info(f"群聊 {chatroom_name} 在指定时间段内无聊天记录")
-                    
-                except Exception as e:
-                    total_sync_results["failed_count"] += 1
-                    total_sync_results["details"].append({
-                        "chatroom_name": chatroom_name,
-                        "error": str(e),
-                        "status": "failed"
-                    })
-                    logger.error(f"同步群聊 {chatroom_name} 失败: {str(e)}")
-            
-            # 5. 保存处理结果到数据库（使用新的 Asset 模型）
-            if total_sync_results["file_records"] or total_sync_results["chat_messages"]:
-                self._save_sync_results(project, total_sync_results)
-            
-            # 6. 更新项目统计信息
-            self._update_project_stats(project)
-            
-            logger.info(f"项目 {project_name} 数据同步完成："
-                       f"成功 {total_sync_results['success_count']} 个群聊，"
-                       f"处理 {total_sync_results['processed_messages']} 条消息，"
-                       f"文件 {total_sync_results['file_messages']} 个，"
-                       f"去重 {total_sync_results['duplicate_messages']} 条，"
-                       f"人员匹配 {total_sync_results['matched_employees']} 个")
-            
+            # 同步完成后，可以选择性地更新项目统计数据
+            if sync_result.get('success'):
+                project = Project.query.get(project_id)
+                if project:
+                    self._update_project_stats(project)
+                    logger.info(f"DataManager: 项目ID {project_id} 的统计数据已更新。")
+
             return {
-                'success': True,
-                'data': total_sync_results
+                'success': sync_result.get('success', False),
+                'data': sync_result
             }
             
         except Exception as e:
-            logger.error(f"同步项目数据失败: {str(e)}")
+            logger.error(f"DataManager: 同步项目ID {project_id} 数据失败: {e}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e)

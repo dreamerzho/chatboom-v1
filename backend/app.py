@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 def create_app():
     app = Flask(__name__)
-    # 允许前端跨域访问，支持cookie，安全指定来源
-    CORS(app, origins=["http://192.168.50.45:3000", "http://localhost:3000"], supports_credentials=True)
+    # 允许所有来源的跨域请求，这在开发环境中是安全的
+    CORS(app, supports_credentials=True)
     app.config.from_object(Config)  # 直接传Config类对象
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db.init_app(app) # 初始化 db
@@ -203,20 +203,9 @@ def create_app():
             logger.error(f"文件上传验证失败: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 500
 
-    # --- 全局OPTIONS兜底路由，防止预检404 ---
-    @app.route('/<path:path>', methods=['OPTIONS'])
-    def options_handler(path):
-        """
-        兜底处理所有未命中的OPTIONS预检请求，返回200和CORS头，防止CORS预检404
-        """
-        response = jsonify({'msg': 'CORS preflight OK'})
-        response.status_code = 200
-        response.headers.add('Access-Control-Allow-Origin', 'http://192.168.50.45:3000')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-        return response
-
+    # 全局的OPTIONS预检请求处理已由`flask_cors`扩展自动完成，不再需要手动编写兜底路由。
+    # 手动编写的路由与扩展冲突，是导致CORS预检失败和"Failed to fetch"错误的根源。
+    
     return app
 
 app = create_app()

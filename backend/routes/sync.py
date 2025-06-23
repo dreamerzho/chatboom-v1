@@ -2,11 +2,14 @@
 # 支持按时间段同步聊天记录、文件等数据，并返回同步进度和日志
 # 集成 chatlog 工具，实现微信群聊数据的自动同步
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from datetime import datetime, timedelta
 import logging
 from typing import Dict, List, Any
 import requests
+import json
+import time
+import re
 
 # 导入数据库模型和 chatlog 集成
 from models.project import Project
@@ -16,6 +19,7 @@ from models.employee import EmployeeMapping
 from chatlog_integration import chatlog_client
 from db import db
 from data_manager import data_manager
+from chatlog_processor import ChatLogProcessor
 
 # 创建蓝图
 sync_bp = Blueprint('sync', __name__, url_prefix='/api/v1/sync')
@@ -376,6 +380,92 @@ def get_chatrooms():
             'success': False,
             'error': str(e)
         }), 500
+
+@sync_bp.route('/project/<int:project_id>/stream', methods=['POST'])
+def sync_project_data_stream(project_id: int):
+    """
+    通过流式响应，实时同步指定项目的数据
+    """
+    # 从请求体获取参数
+    data = request.get_json() or {}
+    # 支持 'YYYY-MM-DD' 或 'YYYYMMDD' 格式
+    date_str_input = data.get('date') 
+    
+    # 将日期格式统一为 YYYYMMDD
+    date_str = None
+    if date_str_input:
+        try:
+            # 替换掉非数字字符
+            cleaned_date = re.sub(r'\D', '', date_str_input)
+            # 验证长度
+            if len(cleaned_date) == 8:
+                # 尝试解析以确认是有效日期
+                datetime.strptime(cleaned_date, '%Y%m%d')
+                date_str = cleaned_date
+            else:
+                logger.warning(f"接收到无效的日期格式: {date_str_input}, 将忽略日期筛选。")
+        except ValueError:
+            logger.warning(f"接收到无效的日期: {date_str_input}, 将忽略日期筛选。")
+
+    def generate_sync_data():
+        # 发送日志的辅助函数
+        def yield_log(message: str):
+            log_entry = {
+                "type": "log",
+                "timestamp": datetime.now().isoformat(),
+                "message": message
+            }
+            # 使用\n\n作为分隔符
+            yield f"data: {json.dumps(log_entry, ensure_ascii=False)}\n\n"
+
+        try:
+            yield_log(f"✅ 开始为项目ID {project_id} 同步数据...")
+            if date_str:
+                yield_log(f"📅 指定日期: {date_str}")
+
+            time.sleep(1) # 暂停一下，让前端能渲染出第一条日志
+
+            # 1. 初始化处理器
+            processor = ChatLogProcessor(
+                project_id=project_id,
+                date_str=date_str, 
+                yield_log=yield_log
+            )
+            
+            # 2. 执行核心处理逻辑
+            result = processor.process_chatlogs()
+
+            # 3. 准备最终的同步结果报告
+            final_report = {
+                "project_id": project_id,
+                "sync_type": "stream",
+                "total_chatrooms": result.get("total_chatrooms", 0),
+                "total_messages": result.get("summary", {}).get("total_new_messages", 0),
+                "total_files": result.get("summary", {}).get("total_new_files", 0),
+                "details": result.get("details", []),
+                "timestamp": datetime.now().isoformat()
+            }
+
+            yield_log("✅ 数据同步流程完成。")
+
+            # 4. 发送最终结果
+            result_entry = {
+                "type": "result",
+                "data": final_report
+            }
+            yield f"data: {json.dumps(result_entry, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"流式同步过程中发生严重错误: {e}", exc_info=True)
+            error_entry = {
+                "type": "error",
+                "timestamp": datetime.now().isoformat(),
+                "message": f"处理失败: {str(e)}"
+            }
+            yield f"data: {json.dumps(error_entry, ensure_ascii=False)}\n\n"
+
+    # 使用 stream_with_context 确保在流式传输期间应用上下文仍然可用
+    return Response(stream_with_context(generate_sync_data()), mimetype='text/event-stream')
 
 @sync_bp.route('/project/<int:project_id>', methods=['POST'])
 def sync_project_data_by_id(project_id: int):

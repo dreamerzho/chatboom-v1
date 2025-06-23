@@ -88,7 +88,8 @@ def create_project():
         new_project = Project(
             project_name=data['project_name'],
             description=data.get('description', ''),
-            status=data.get('status', '进行中'),
+            status=data.get('status', 'active'),
+            # 只有当start_date和end_date在data中存在且不为空时，才进行转换
             start_date=datetime.fromisoformat(data['start_date']) if data.get('start_date') else None,
             end_date=datetime.fromisoformat(data['end_date']) if data.get('end_date') else None,
             created_at=datetime.utcnow()
@@ -207,9 +208,11 @@ def update_project(project_id):
         if 'status' in data:
             project.status = data['status']
         if 'start_date' in data:
-            project.start_date = datetime.fromisoformat(data['start_date']) if data['start_date'] else None
+            # 只有当start_date在data中存在且不为空时，才进行转换
+            project.start_date = datetime.fromisoformat(data['start_date']) if data.get('start_date') else None
         if 'end_date' in data:
-            project.end_date = datetime.fromisoformat(data['end_date']) if data['end_date'] else None
+            # 只有当end_date在data中存在且不为空时，才进行转换
+            project.end_date = datetime.fromisoformat(data['end_date']) if data.get('end_date') else None
         
         project.updated_at = datetime.utcnow()
         

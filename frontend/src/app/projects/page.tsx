@@ -29,6 +29,7 @@ import {
   Descriptions,
   Badge,
   notification,
+  Drawer,
 } from 'antd';
 import { 
   PlusOutlined, 
@@ -43,8 +44,9 @@ import {
   CloseOutlined,
   InfoCircleOutlined
 } from '@ant-design/icons';
-import { projectAPI, syncAPI, chatlogAPI } from '../../lib/api';
+import { projectAPI, syncAPI, chatlogAPI, employeeAPI } from '../../lib/api';
 import dayjs from 'dayjs';
+import Link from 'next/link';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -77,6 +79,7 @@ interface ProjectFormData {
   project_name: string;
   project_short_name: string;
   description: string;
+  status: 'active' | 'archived'; // 明确添加 status 字段
   internal_chat_groups?: string[];
   external_chat_groups?: string[];
   employee_ids?: number[];
@@ -166,6 +169,9 @@ function ProjectsPage() {
   const [chatGroups, setChatGroups] = useState<string[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
 
+  // 新增状态：控制显示'active'（执行中）或'archived'（已结束）项目
+  const [displayStatus, setDisplayStatus] = useState('active'); 
+
   // 新增状态：用于搜索、过滤和排序
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // all, good, warning, danger
@@ -173,6 +179,12 @@ function ProjectsPage() {
 
   // 同步项目ID状态
   const [syncingProjectId, setSyncingProjectId] = useState<number | null>(null);
+
+  // 新增：同步结果抽屉相关状态
+  const [syncDrawerVisible, setSyncDrawerVisible] = useState(false);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [syncLog, setSyncLog] = useState<string[]>([]);
+  const [currentSyncProject, setCurrentSyncProject] = useState<Project | null>(null);
 
   // 获取项目列表
   const fetchProjects = async () => {
@@ -202,22 +214,27 @@ function ProjectsPage() {
 
   // 获取员工列表 (新增)
   const fetchEmployees = async () => {
-    // 实际项目中,这里会调用API
-    // const response = await employeeAPI.getEmployees();
-    // if (response.success) setEmployees(response.data);
-    setEmployees([
-      { id: 1, name: '张三' },
-      { id: 2, name: '李四' },
-      { id: 3, name: '王五' },
-      { id: 4, name: '赵六' },
-      { id: 5, name: '孙七' },
-    ]);
+    const response = await employeeAPI.getEmployees();
+    if (response.success && response.data) {
+      // 后端返回的是EmployeeMapping[], 前端需要的是{id, name}
+      const formattedEmployees = response.data.map((emp: any) => ({
+        id: emp.id,
+        name: emp.real_name,
+      }));
+      setEmployees(formattedEmployees);
+    }
   };
 
   // Memoized: 过滤和排序项目列表
   const filteredAndSortedProjects = React.useMemo(() => {
-    // 根据用户要求，主列表只展示 "执行中" (active) 的项目
-    let result = projects.filter(p => p.status === 'active');
+    // 根据选择的视图（执行中/已结束）过滤项目
+    let result = projects.filter(p => {
+      if (displayStatus === 'active') {
+        return p.status === 'active';
+      } else {
+        return p.status !== 'active';
+      }
+    });
 
     // 根据搜索词过滤
     if (searchQuery) {
@@ -245,7 +262,7 @@ function ProjectsPage() {
     });
 
     return result;
-  }, [projects, searchQuery, statusFilter, sortOrder]);
+  }, [projects, searchQuery, statusFilter, sortOrder, displayStatus]);
 
   // 添加项目
   const handleAddProject = async (values: ProjectFormData) => {
@@ -276,6 +293,17 @@ function ProjectsPage() {
         setEditingProject(null);
         form.resetFields();
         fetchProjects();
+        
+        // 如果项目状态从"已结束"变更为"执行中"，则自动切换视图
+        if (editingProject.status !== 'active' && values.status === 'active') {
+          setDisplayStatus('active');
+          notification.info({
+            message: '项目状态已更新',
+            description: `项目 "${values.project_name}" 已移至"执行中"列表。`,
+            placement: 'topRight',
+          });
+        }
+
       } else {
         message.error(response.error || '项目更新失败');
       }
@@ -349,9 +377,11 @@ function ProjectsPage() {
 
   // 提交表单
   const handleSubmit = () => {
-    form.validateFields().then((values) => {
+    form.validateFields().then((values: ProjectFormData) => {
+      // 确保 status 字段存在
       const processedValues = {
         ...values,
+        status: values.status || (editingProject ? editingProject.status : 'active'),
         internal_chat_groups: values.internal_chat_groups || [],
         external_chat_groups: values.external_chat_groups || []
       };
@@ -364,50 +394,79 @@ function ProjectsPage() {
     });
   };
 
-  // 同步数据 (重构)
+  // 同步数据 (重构为使用流式响应和抽屉)
   const handleSyncData = async (project: Project) => {
     setSyncingProjectId(project.id);
-    // 快速同步默认使用最近7天的数据
-    const syncRequest = {
-      start_date: dayjs().subtract(7, 'day').format('YYYY-MM-DD'),
-      end_date: dayjs().format('YYYY-MM-DD'),
-      sync_type: 'all',
-      chatroom_names: [],
-    };
+    setCurrentSyncProject(project);
+    setSyncDrawerVisible(true);
+    setSyncLog([`[${dayjs().format('HH:mm:ss')}] 开始为项目 "${project.project_name}" 同步最近7天的数据...`]);
+    setSyncResult(null);
+
     try {
-      const response = await syncAPI.syncProject(project.id, syncRequest);
-      if (response.success && response.data && response.data.results) {
-        const { total_messages, total_files } = response.data.results;
-        notification.success({
-          message: '同步成功',
-          description: `项目「${project.project_name}」数据已更新。新增聊天记录 ${total_messages} 条，新识别文件 ${total_files} 个。`,
-          placement: 'topRight',
-        });
-        fetchProjects(); // 重新获取数据以更新卡片信息
-      } else {
-        notification.error({
-          message: '同步失败',
-          description: response.error || '无法连接到聊天记录服务器，请检查服务状态或稍后重试。',
-          placement: 'topRight',
-          duration: 0, // 永久显示直到用户关闭
-        });
+      // 后端使用流式传输，所以用fetch API来处理
+      const response = await fetch(`/api/v1/sync/project/${project.id}/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          start_date: dayjs().subtract(7, 'day').format('YYYY-MM-DD'),
+          end_date: dayjs().format('YYYY-MM-DD'),
+          sync_type: 'all',
+          chatroom_names: [],
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
       }
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          setSyncLog(prev => [...prev, `[${dayjs().format('HH:mm:ss')}] 数据同步完成。`]);
+          break;
+        }
+        
+        const chunk = decoder.decode(value, { stream: true });
+        // 后端可能一次发送多个事件，用 data: 分割
+        const lines = chunk.split('\n').filter(line => line.startsWith('data:'));
+
+        for (const line of lines) {
+            const jsonString = line.substring(5); // 移除 "data:"
+            if (jsonString.trim()) {
+                const data = JSON.parse(jsonString);
+                if (data.type === 'log') {
+                  setSyncLog(prev => [...prev, `[${dayjs().format('HH:mm:ss')}] ${data.message}`]);
+                } else if (data.type === 'result') {
+                  setSyncResult(data.data);
+                  notification.success({
+                    message: '同步成功',
+                    description: `项目「${project.project_name}」数据已更新。`,
+                    placement: 'topRight',
+                  });
+                  fetchProjects(); // 同步成功后刷新项目数据
+                }
+            }
+        }
+      }
+
     } catch (error) {
       console.error('同步失败:', error);
+      const errorMessage = `[${dayjs().format('HH:mm:ss')}] 同步失败: ${error instanceof Error ? error.message : '未知错误'}`;
+      setSyncLog(prev => [...prev, errorMessage]);
       notification.error({
         message: '同步失败',
-        description: '发生未知错误，请联系技术支持。',
+        description: '无法连接到服务器或处理数据时发生错误。',
         placement: 'topRight',
         duration: 0,
       });
     } finally {
       setSyncingProjectId(null);
     }
-  };
-
-  // 查看项目详情 (重构)
-  const handleViewDetails = (project: Project) => {
-    router.push(`/projects/${project.id}`);
   };
 
   // 加载群聊列表
@@ -477,7 +536,11 @@ function ProjectsPage() {
           </Card>
         </Col>
         <Col span={8}>
-          <Card>
+          <Card 
+            hoverable
+            onClick={() => setDisplayStatus('active')}
+            style={{ border: displayStatus === 'active' ? '2px solid #52c41a' : '', cursor: 'pointer' }}
+          >
             <Statistic
               title="执行中项目数"
               value={projects.filter(p => p.status === 'active').length}
@@ -486,7 +549,11 @@ function ProjectsPage() {
           </Card>
         </Col>
         <Col span={8}>
-          <Card>
+          <Card 
+            hoverable
+            onClick={() => setDisplayStatus('archived')}
+            style={{ border: displayStatus === 'archived' ? '2px solid #faad14' : '', cursor: 'pointer' }}
+          >
             <Statistic
               title="已结束项目数"
               value={projects.filter(p => p.status !== 'active').length}
@@ -501,7 +568,7 @@ function ProjectsPage() {
         <Row gutter={16} justify="space-between" align="middle">
           <Col flex="auto">
             <Input.Search
-              placeholder="搜索执行中的项目..."
+              placeholder={displayStatus === 'active' ? "搜索执行中的项目..." : "搜索已结束的项目..."}
               onSearch={value => setSearchQuery(value)}
               onChange={e => setSearchQuery(e.target.value)}
               style={{ width: '100%' }}
@@ -566,20 +633,21 @@ function ProjectsPage() {
                   </Row>
                   
                   <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-                    <Button 
-                      icon={<SyncOutlined />} 
-                      onClick={() => handleSyncData(project)}
-                      loading={syncingProjectId === project.id}
-                    >
-                      {syncingProjectId === project.id ? '同步中...' : '同步数据'}
-                    </Button>
-                    <Button 
-                      type="primary"
-                      icon={<EyeOutlined />}
-                      onClick={() => handleViewDetails(project)}
-                    >
-                      查看详情
-                    </Button>
+                    <Tooltip title="编辑项目">
+                      <Button icon={<EditOutlined />} onClick={() => handleEdit(project)} />
+                    </Tooltip>
+                    <Tooltip title="同步数据">
+                      <Button 
+                        icon={<SyncOutlined />} 
+                        onClick={() => handleSyncData(project)}
+                        loading={syncingProjectId === project.id}
+                      />
+                    </Tooltip>
+                    <Link href={`/projects/${project.id}`} passHref>
+                      <Button type="primary" icon={<EyeOutlined />}>
+                        查看详情
+                      </Button>
+                    </Link>
                   </Space>
                 </Card>
               </List.Item>
@@ -624,6 +692,7 @@ function ProjectsPage() {
             internal_chat_groups: editingProject?.internal_chat_groups || [],
             external_chat_groups: editingProject?.external_chat_groups || [],
             employee_ids: [], // 这里可以根据实际情况填充
+            status: editingProject?.status || 'active', // 确保 status 有初始值
           }}
         >
           <Form.Item
@@ -653,15 +722,14 @@ function ProjectsPage() {
           <Form.Item
             name="internal_chat_groups"
             label="关联内部群聊"
+            rules={[{ required: true, message: '请至少关联一个内部群聊' }]}
           >
             <Select
-              mode="multiple"
-              allowClear
-              placeholder="搜索或选择内部沟通群"
-              options={chatGroups.map(group => ({ label: group, value: group }))}
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
+              mode="tags"
+              style={{ width: '100%' }}
+              placeholder="输入或选择内部群聊，可输入多个"
+              tokenSeparators={[',']}
+              options={chatGroups.map(group => ({ value: group, label: group }))}
             />
           </Form.Item>
 
@@ -670,14 +738,23 @@ function ProjectsPage() {
             label="关联外部群聊"
           >
             <Select
-              mode="multiple"
-              allowClear
-              placeholder="搜索或选择外部客户群"
-              options={chatGroups.map(group => ({ label: group, value: group }))}
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
+              mode="tags"
+              style={{ width: '100%' }}
+              placeholder="输入或选择外部客户群，可输入多个"
+              tokenSeparators={[',']}
+              options={chatGroups.map(group => ({ value: group, label: group }))}
             />
+          </Form.Item>
+
+          <Form.Item
+            name="status"
+            label="项目状态"
+            rules={[{ required: true, message: '请选择项目状态' }]}
+          >
+            <Select placeholder="请选择项目状态">
+              <Option value="active">执行中</Option>
+              <Option value="archived">已结束</Option>
+            </Select>
           </Form.Item>
 
           <Form.Item
@@ -696,6 +773,47 @@ function ProjectsPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 同步数据结果抽屉 */}
+      <Drawer
+        title={`项目同步详情: ${currentSyncProject?.project_name}`}
+        placement="right"
+        onClose={() => setSyncDrawerVisible(false)}
+        open={syncDrawerVisible}
+        width={640}
+      >
+        <Title level={5}>同步日志</Title>
+        <Card style={{ marginBottom: 24, background: '#222', color: '#fff', height: 300, overflowY: 'auto' }}>
+          {syncLog.map((log, index) => (
+            <p key={index} style={{ margin: 0, fontFamily: 'monospace', fontSize: 12 }}>{log}</p>
+          ))}
+          {syncingProjectId && <Spin size="small" />}
+        </Card>
+
+        <Title level={5}>同步结果</Title>
+        {syncResult ? (
+          <Descriptions bordered column={1}>
+            <Descriptions.Item label="同步状态">
+              <Badge status="success" text="成功" />
+            </Descriptions.Item>
+            <Descriptions.Item label="同步范围">{`${syncResult.start_date} ~ ${syncResult.end_date}`}</Descriptions.Item>
+            <Descriptions.Item label="总计处理群聊">{syncResult.total_chatrooms}</Descriptions.Item>
+            <Descriptions.Item label="成功群聊数">{syncResult.success_count}</Descriptions.Item>
+            <Descriptions.Item label="失败群聊数">{syncResult.failed_count > 0 ? <Text type="danger">{syncResult.failed_count}</Text> : 0}</Descriptions.Item>
+            <Descriptions.Item label="新增消息数">{syncResult.total_messages}</Descriptions.Item>
+            <Descriptions.Item label="新增文件数">{syncResult.total_files}</Descriptions.Item>
+            <Descriptions.Item label="详细信息">
+              {syncResult.details.map((detail, i) => (
+                <Tag key={i} color={detail.status === 'success' ? 'green' : 'red'}>
+                  {detail.chatroom_name}: {detail.status}
+                </Tag>
+              ))}
+            </Descriptions.Item>
+          </Descriptions>
+        ) : (
+          <Text type="secondary">同步完成后将在此处显示结果...</Text>
+        )}
+      </Drawer>
     </div>
   );
 }
