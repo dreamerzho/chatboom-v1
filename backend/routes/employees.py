@@ -9,7 +9,7 @@ import logging
 from db import db
 
 # 导入统一数据管理器
-from data_manager import data_manager
+from data_manager import data_manager, DataManager
 from utils import APIResponse, ValidationHelper, PaginationHelper
 from models.employee import EmployeeMapping
 from models.workload import WorkloadRecord
@@ -20,6 +20,8 @@ employees_bp = Blueprint('employees', __name__, url_prefix='/api/v1/employees')
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+data_manager = DataManager()
 
 @employees_bp.route('/', methods=['GET'])
 def get_employees():
@@ -194,36 +196,28 @@ def get_employee_workloads(employee_id):
         return APIResponse.database_error(str(e))
 
 @employees_bp.route('/<int:employee_id>/stats', methods=['GET'])
-def get_employee_stats(employee_id):
+def get_employee_full_stats(employee_id):
     """
-    获取某员工的聚合统计（总WE、过程WE、平均迭代、参与项目数等）
-    参数：period（如7d/30d/90d），默认7d
+    统一聚合员工统计数据API
+    - 聚合产出（工作量、WE、岗位分布等）与沟通（消息数、文件数、活跃天数等）所有核心统计字段
+    - 前端可一次性获取全部员工相关统计数据
+    - 支持可选参数：start_date, end_date
     """
     try:
-        period = request.args.get('period', '7d')
-        days = int(period.replace('d',''))
-        since = datetime.now().date() - timedelta(days=days)
-        records = WorkloadRecord.query.filter(
-            WorkloadRecord.employee_id == employee_id,
-            WorkloadRecord.date >= since
-        ).all()
-        total_we = sum([r.we_value for r in records])
-        process_we = sum([r.we_value for r in records if r.is_iteration])
-        final_we = sum([r.we_value for r in records if r.is_final])
-        avg_iteration = sum([r.iteration_count for r in records]) / len(records) if records else 0
-        project_ids = set([r.project_id for r in records])
-        return jsonify({
-            'employee_id': employee_id,
-            'period': period,
-            'total_we': total_we,
-            'process_we': process_we,
-            'final_we': final_we,
-            'avg_iteration': avg_iteration,
-            'project_count': len(project_ids)
-        })
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        # 调用统一聚合方法
+        result = data_manager.get_employee_full_stats(
+            employee_id=employee_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        if result['success']:
+            return jsonify(result)
+        else:
+            return jsonify({'success': False, 'error': result['error']}), 404
     except Exception as e:
-        logger.error(f"获取员工统计失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @employees_bp.route('/<int:employee_id>/risk-events', methods=['GET'])
 def get_employee_risk_events(employee_id):

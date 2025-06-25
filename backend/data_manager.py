@@ -241,7 +241,7 @@ class DataManager:
             # 保存聊天消息
             for message_data in sync_result.get('chat_messages', []):
                 chat_message = ChatMessage(
-                    message_id=message_data.get('message_id', ''),
+                    message_id=message_data.get('message_id') or message_data.get('seq', ''),
                     talker_name=message_data.get('talker_name', ''),
                     sender_name=message_data.get('sender_name', ''),
                     message_type=message_data.get('message_type', 1),
@@ -666,6 +666,107 @@ class DataManager:
         except Exception as e:
             logger.error(f"批量添加员工映射失败: {str(e)}")
             db.session.rollback()
+            return {'success': False, 'error': str(e)}
+
+    def get_employee_full_stats(self, employee_id: int, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+        """
+        统一聚合员工统计数据
+        - 同时聚合产出（工作量、WE、岗位分布等）与沟通（消息数、文件数、活跃天数等）所有核心统计字段
+        - 便于前端一次性获取全部员工相关统计数据
+        - 参数：employee_id 员工ID，start_date 开始日期，end_date 结束日期
+        - 返回：success, data（包含产出与沟通统计）
+        """
+        try:
+            # 产出类统计（调用 get_employee_workload_stats 逻辑）
+            workload_stats = self._get_employee_workload_stats_internal(employee_id, start_date, end_date)
+            # 沟通类统计（调用 get_employee_stats 逻辑）
+            comm_stats = self.get_employee_stats(employee_id, start_date, end_date)
+            if not workload_stats['success']:
+                return {'success': False, 'error': workload_stats.get('error', '产出统计失败')}
+            if not comm_stats['success']:
+                return {'success': False, 'error': comm_stats.get('error', '沟通统计失败')}
+            # 合并结构，字段对齐
+            return {
+                'success': True,
+                'data': {
+                    'employee_info': comm_stats['data']['employee_info'],
+                    '产出统计': workload_stats['data'],
+                    '沟通统计': comm_stats['data']
+                }
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _get_employee_workload_stats_internal(self, employee_id: int, start_date: Optional[str], end_date: Optional[str]) -> Dict[str, Any]:
+        """
+        内部方法：复用 get_employee_workload_stats 的聚合逻辑，便于统一聚合API调用
+        """
+        try:
+            # 获取时间范围参数
+            if not start_date:
+                start_date_obj = datetime.today().date() - timedelta(days=30)
+            else:
+                start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
+            if not end_date:
+                end_date_obj = datetime.today().date()
+            else:
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+            # 获取员工信息
+            employee = EmployeeMapping.query.filter(EmployeeMapping.id == employee_id).first()
+            if not employee:
+                return {'success': False, 'error': '员工不存在'}
+            # 获取工作量记录
+            records = WorkloadRecord.query.filter(
+                and_(
+                    WorkloadRecord.employee_id == employee_id,
+                    WorkloadRecord.date >= start_date_obj,
+                    WorkloadRecord.date <= end_date_obj
+                )
+            ).all()
+            # 统计数据
+            total_we = sum(record.we_value for record in records)
+            total_records = len(records)
+            final_records = sum(1 for record in records if record.is_final)
+            iteration_records = sum(1 for record in records if record.is_iteration)
+            role_stats = {}
+            for record in records:
+                role = record.role
+                if role not in role_stats:
+                    role_stats[role] = {
+                        'total_we': 0,
+                        'record_count': 0,
+                        'final_count': 0
+                    }
+                role_stats[role]['total_we'] += record.we_value
+                role_stats[role]['record_count'] += 1
+                if record.is_final:
+                    role_stats[role]['final_count'] += 1
+            # 负荷指数（如有分析服务可调用）
+            load_index = 0
+            try:
+                load_index = self.analysis_service.calculate_employee_load_index(employee_id, start_date_obj, end_date_obj)
+            except Exception:
+                pass
+            return {
+                'success': True,
+                'data': {
+                    'period': {
+                        'start_date': start_date_obj.isoformat(),
+                        'end_date': end_date_obj.isoformat(),
+                        'days': (end_date_obj - start_date_obj).days + 1
+                    },
+                    'summary': {
+                        'total_we': round(total_we, 2),
+                        'total_records': total_records,
+                        'final_records': final_records,
+                        'iteration_records': iteration_records,
+                        'avg_we_per_day': round(total_we / max(1, (end_date_obj - start_date_obj).days + 1), 2)
+                    },
+                    'role_stats': role_stats,
+                    'load_index': load_index
+                }
+            }
+        except Exception as e:
             return {'success': False, 'error': str(e)}
 
 # 创建全局数据管理器实例
