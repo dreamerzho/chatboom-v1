@@ -10,6 +10,7 @@ from models import Project, ProjectChatroom, ChatMessage, FileRecord, EmployeeMa
 from models.workload import WorkloadRecord
 from models.project_health import ProjectHealthStats
 from models.risk_event import RiskEvent
+from itertools import groupby
 
 # 创建蓝图
 projects_bp = Blueprint('projects', __name__, url_prefix='/api/v1/projects')
@@ -143,9 +144,9 @@ def create_project():
 @projects_bp.route('/<int:project_id>', methods=['GET'])
 def get_project(project_id):
     """
-    获取单个项目详情
+    获取单个项目详情（补全聚合统计字段）
     参数: project_id - 项目ID
-    返回: 项目详情
+    返回: 项目详情，包含统计卡片、健康分、风险、关键词分析等
     """
     try:
         project = Project.query.get(project_id)
@@ -162,21 +163,104 @@ def get_project(project_id):
                 'created_at': c.created_at.isoformat() if c.created_at else None
             } for c in chatrooms
         ]
+        # 自动聚合weData
+        records = WorkloadRecord.query.filter_by(project_id=project.id).all()
+        color_list = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#8dd1e1', '#a4de6c']
+        employee_map = {e.id: e.real_name for e in EmployeeMapping.query.all()}
+        we_data = []
+        for idx, (emp_id, group) in enumerate(groupby(sorted(records, key=lambda r: r.employee_id), key=lambda r: r.employee_id)):
+            total_we = sum(r.we_value for r in group)
+            we_data.append({
+                'name': employee_map.get(emp_id, '未知'),
+                'value': total_we,
+                'color': color_list[idx % len(color_list)]
+            })
+        # ========== 新增：项目统计卡片数据 ==========
+        # 统计项目相关的文件
+        total_files = FileRecord.query.filter_by(project_id=project.id).count()
+        compliant_files = FileRecord.query.filter_by(project_id=project.id, status='compliant').count()
+        # 统计项目相关的消息
+        chatroom_names = [c.chatroom_name for c in chatrooms]
+        total_messages = ChatMessage.query.filter(ChatMessage.talker_name.in_(chatroom_names)).count()
+        # 合规率
+        compliance_rate = round((compliant_files / total_files) * 100, 2) if total_files else 0.0
+        # 参与员工列表
+        employee_ids = set([r.employee_id for r in records])
+        employees = [employee_map.get(eid, '未知') for eid in employee_ids]
+        # ========== 新增：健康分、风险、关键词分析 ==========
+        # 健康分
+        health_stat = ProjectHealthStats.query.filter_by(project_id=project.id).order_by(ProjectHealthStats.created_at.desc()).first()
+        health_score = health_stat.health_score if health_stat else None
+        risk_level = health_stat.risk_level if health_stat else None
+        # 风险事件
+        recent_risks = RiskEvent.query.filter_by(project_id=project.id).order_by(RiskEvent.event_time.desc()).limit(5).all()
+        risks = [r.to_dict() for r in recent_risks]
+        # 关键词分析（如有关键词分析表/服务，可补充）
+        from models.keyword import KeywordAnalysis
+        keyword_analysis = KeywordAnalysis.query.filter_by(project_id=project.id).order_by(KeywordAnalysis.created_at.desc()).first()
+        keywords = {}
+        if keyword_analysis:
+            keywords = {
+                'positive_score': keyword_analysis.positive_score,
+                'negative_score': keyword_analysis.negative_score,
+                'neutral_score': keyword_analysis.neutral_score,
+                'top_keywords': keyword_analysis.top_keywords,
+                'overall_sentiment': keyword_analysis.overall_sentiment
+            }
+        # 近期动态（最近10条文件或消息）
+        recent_files = FileRecord.query.filter_by(project_id=project.id).order_by(FileRecord.upload_time.desc()).limit(5).all()
+        recent_msgs = ChatMessage.query.filter(ChatMessage.talker_name.in_(chatroom_names)).order_by(ChatMessage.timestamp.desc()).limit(5).all()
+        recent_activities = [
+            {
+                'type': 'file_upload',
+                'title': f.original_name,
+                'description': f'由{f.uploader}上传',
+                'time': f.upload_time.isoformat() if f.upload_time else '',
+                'status': f.status
+            } for f in recent_files
+        ] + [
+            {
+                'type': 'message',
+                'title': m.content[:20] if m.content else '',
+                'description': f'由{m.sender_name}发送',
+                'time': m.timestamp.isoformat() if m.timestamp else '',
+                'status': m.message_type
+            } for m in recent_msgs
+        ]
+        recent_activities = sorted(recent_activities, key=lambda x: x['time'], reverse=True)[:10]
+        # ========== 组装返回结构 ==========
+        project_data = {
+            'id': project.id,
+            'project_name': project.project_name,
+            'description': project.description,
+            'status': project.status,
+            'start_date': project.start_date.isoformat() if project.start_date else None,
+            'end_date': project.end_date.isoformat() if project.end_date else None,
+            'created_at': project.created_at.isoformat() if project.created_at else None,
+            'updated_at': project.updated_at.isoformat() if project.updated_at else None,
+            'chatrooms': chatroom_list,
+            'internal_chat_groups': internal_chat_groups,
+            'external_chat_groups': external_chat_groups,
+            'weData': we_data,  # 员工WE分布
+            'stats': {  # 项目统计卡片
+                'total_we': sum([w['value'] for w in we_data]),
+                'total_files': total_files,
+                'total_messages': total_messages,
+                'compliant_files': compliant_files,
+                'compliance_rate': compliance_rate,
+                'employees': employees
+            },
+            'health': {
+                'health_score': health_score,
+                'risk_level': risk_level
+            },
+            'risks': risks,  # 近期风险事件
+            'keywords': keywords,  # 关键词分析
+            'recent_activities': recent_activities  # 近期动态
+        }
         return jsonify({
             'success': True,
-            'data': {
-                'id': project.id,
-                'project_name': project.project_name,
-                'description': project.description,
-                'status': project.status,
-                'start_date': project.start_date.isoformat() if project.start_date else None,
-                'end_date': project.end_date.isoformat() if project.end_date else None,
-                'created_at': project.created_at.isoformat() if project.created_at else None,
-                'updated_at': project.updated_at.isoformat() if project.updated_at else None,
-                'chatrooms': chatroom_list,
-                'internal_chat_groups': internal_chat_groups,
-                'external_chat_groups': external_chat_groups
-            }
+            'data': project_data
         })
     except Exception as e:
         logger.error(f"获取项目详情失败: {str(e)}")

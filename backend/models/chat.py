@@ -16,7 +16,7 @@ class ChatMessage(db.Model):
     message_id = db.Column(db.String(128), unique=True)  # 消息唯一标识
     talker_name = db.Column(db.String(128), nullable=False)  # 群聊名称
     sender_name = db.Column(db.String(128), nullable=False)  # 发送者昵称
-    message_type = db.Column(db.Integer, nullable=False)  # 消息类型（1=文本，3=图片，49=文件等）
+    message_type = db.Column(db.String(32), nullable=False)  # 消息类型（如：文本、图片、文件、图片消息、视频等，支持字符串）
     content = db.Column(db.Text)  # 消息内容（重命名为content以匹配API）
     message_content = db.Column(db.Text)  # 消息内容（保留原字段）
     file_name = db.Column(db.String(256))  # 文件名（当消息类型为文件时）

@@ -121,7 +121,7 @@ def main():
     create_risk_events(projects, employees)
     print('mock 数据生成完毕！')
 
-if __name__ == '__main__':
-    app = create_app()
-    with app.app_context():
-        main() 
+#if __name__ == '__main__':
+#    app = create_app()
+#    with app.app_context():
+#        main() 

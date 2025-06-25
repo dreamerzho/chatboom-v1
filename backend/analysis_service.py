@@ -458,4 +458,63 @@ class AnalysisService:
             'value': round(avg_hours, 1),
             'change': -0.05,  # 模拟数据
             'trend': trend
-        } 
+        }
+    
+    def calculate_workload_equivalent_from_parsed_data(self, parsed_data) -> float:
+        """
+        根据解析数据计算工作量当量 (WE)
+        
+        Args:
+            parsed_data: ParserService解析后的数据对象
+            
+        Returns:
+            float: 工作量当量
+        """
+        # 基础WE：从工作量描述计算
+        base_we = 0.0
+        if parsed_data.workload_amount:
+            base_we = self._parse_workload_amount(parsed_data.workload_amount)
+        
+        # 文件类型权重调整
+        file_type_weight = self._get_file_type_weight(parsed_data.file_extension, 'other')
+        
+        # 版本复杂度调整
+        version_complexity = 1.0 + (parsed_data.version - 1) * 0.3
+        version_complexity = min(version_complexity, 2.0)  # 最大不超过2倍
+        
+        # 最终WE = 基础WE × 文件类型权重 × 版本复杂度
+        final_we = base_we * file_type_weight * version_complexity
+        
+        return round(final_we, 2)
+    
+    def _parse_workload_amount(self, workload_str: str) -> float:
+        """
+        解析工作量描述，转换为WE值
+        
+        Args:
+            workload_str: 工作量字符串，如 "2p", "3条"
+            
+        Returns:
+            float: WE值
+        """
+        if not workload_str:
+            return 1.0  # 默认值
+        
+        # 处理数字+单位的格式
+        import re
+        match = re.match(r'(\d+)([pP条])', workload_str)
+        if match:
+            number = int(match.group(1))
+            unit = match.group(2)
+            
+            # 根据单位转换
+            if unit.lower() == 'p':
+                return float(number)  # 1p = 1WE
+            elif unit == '条':
+                return float(number) * 0.5  # 1条 = 0.5WE
+        
+        # 如果无法解析，尝试直接转换为数字
+        try:
+            return float(workload_str)
+        except ValueError:
+            return 1.0  # 默认值 

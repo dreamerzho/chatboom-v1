@@ -158,7 +158,7 @@ function DashboardPageV2() {
 
 
   if (loading) {
-    return (
+  return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 140px)' }}>
         <Spin size="large" tip="正在生成数据概览..." />
       </div>
@@ -192,7 +192,7 @@ function DashboardPageV2() {
       <Row gutter={[24, 24]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
           <Card bordered={false}>
-            <Statistic
+            <Statistic 
               title="团队负荷状态"
               valueRender={() => (
                 <Space size="small">
@@ -209,7 +209,7 @@ function DashboardPageV2() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card bordered={false}>
-            <Statistic
+            <Statistic 
               title="项目健康度"
               valueRender={() => (
                 <Space size="small">
@@ -226,7 +226,7 @@ function DashboardPageV2() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card bordered={false}>
-            <Statistic
+            <Statistic 
               title="待处理风险"
               value={mockData.kpi.pending_risks}
               valueStyle={{ fontSize: 30, fontWeight: 600 }}
@@ -263,12 +263,12 @@ function DashboardPageV2() {
           <Card bordered={false} title={<Title level={4}>团队工作量趋势 (最近7天)</Title>}>
             <div style={{ height: 320 }}>
               <Bar {...workloadChartConfig} />
-            </div>
+              </div>
           </Card>
         </Col>
         <Col xs={24} lg={8}>
           <Card bordered={false} title={<Title level={4}>实时风险流</Title>} style={{height: '100%'}}>
-             <List
+              <List
                 itemLayout="horizontal"
                 dataSource={mockData.risk_feed}
                 renderItem={item => (
@@ -280,7 +280,7 @@ function DashboardPageV2() {
                     />
                   </List.Item>
                 )}
-             />
+              />
           </Card>
         </Col>
       </Row>
@@ -313,7 +313,7 @@ function DashboardPageV2() {
                 </TabPane>
             </Tabs>
           </Card>
-        </Col>
+              </Col>
         <Col xs={24} lg={12}>
           <Card bordered={false} title={<Title level={4}>项目风险榜</Title>}>
              <Table columns={riskColumns} dataSource={mockData.project_risks} pagination={false} />

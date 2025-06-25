@@ -35,6 +35,7 @@ class FileRecord(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     duration_hours = db.Column(db.Float, nullable=True)  # 工时（小时），同一任务多版本时间差
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=True)  # 关联项目ID，可为空
     
     # 关联字段
     employee_id = db.Column(db.Integer, db.ForeignKey('employee_mappings.id'))  # 关联员工

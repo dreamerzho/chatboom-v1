@@ -208,7 +208,8 @@ class DataManager:
                         status=file_data.get('status', 'pending'),
                         chatroom_name=file_data.get('chatroom_name', ''),
                         message_seq=file_data.get('message_seq', ''),
-                        employee_id=file_data.get('employee_id')
+                        employee_id=file_data.get('employee_id'),
+                        project_id=project.id
                     )
                     db.session.add(file_record)
                     
@@ -232,7 +233,8 @@ class DataManager:
                         status='non_compliant',
                         chatroom_name=file_data.get('chatroom_name', ''),
                         message_seq=file_data.get('message_seq', ''),
-                        employee_id=file_data.get('employee_id')
+                        employee_id=file_data.get('employee_id'),
+                        project_id=project.id
                     )
                     db.session.add(file_record)
             

@@ -31,6 +31,7 @@ def create_app():
     # 导入API路由蓝图
     from routes import employees_bp, projects_bp, files_bp, dashboard_bp, chatlog_bp, sync_bp, keywords_bp
     from routes.unmatched import unmatched_bp
+    from routes.workload import workload_bp
     app.register_blueprint(employees_bp)
     app.register_blueprint(projects_bp)
     app.register_blueprint(files_bp)
@@ -39,6 +40,7 @@ def create_app():
     app.register_blueprint(sync_bp)
     app.register_blueprint(keywords_bp)
     app.register_blueprint(unmatched_bp)
+    app.register_blueprint(workload_bp)
 
     @app.route('/', methods=['GET'])
     def index():

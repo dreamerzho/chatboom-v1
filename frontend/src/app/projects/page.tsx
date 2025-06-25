@@ -4,7 +4,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { 
   Card, 
   List, 
@@ -18,37 +17,33 @@ import {
   Spin, 
   Alert, 
   message, 
-  Popconfirm, 
   Tooltip, 
   Tag, 
   Statistic, 
   Row, 
   Col,
   DatePicker,
-  Divider,
-  Descriptions,
   Badge,
   notification,
   Drawer,
+  Descriptions,
 } from 'antd';
 import { 
   PlusOutlined, 
   EditOutlined, 
-  DeleteOutlined, 
   SyncOutlined, 
   EyeOutlined, 
-  ReloadOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   CloseCircleOutlined,
   CloseOutlined,
   InfoCircleOutlined
 } from '@ant-design/icons';
-import { projectAPI, syncAPI, chatlogAPI, employeeAPI } from '../../lib/api';
+import { projectAPI, syncAPI, employeeAPI } from '../../lib/api';
 import dayjs from 'dayjs';
 import Link from 'next/link';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 
@@ -83,22 +78,6 @@ interface ProjectFormData {
   internal_chat_groups?: string[];
   external_chat_groups?: string[];
   employee_ids?: number[];
-}
-
-// 群聊接口
-interface Chatroom {
-  id: string;
-  name: string;
-  member_count?: number;
-  created_at?: string;
-}
-
-// 同步状态接口
-interface SyncStatus {
-  status: string;
-  message: string;
-  timestamp: string;
-  api_base: string;
 }
 
 // 同步结果接口
@@ -144,12 +123,27 @@ const getHealthStatusConfig = (status: 'good' | 'warning' | 'danger') => {
   return configs[status];
 };
 
-// 获取群聊列表
-const fetchChatGroups = async (): Promise<string[]> => {
+// 1. 群聊下拉数据结构调整，支持 nickname
+// chatGroups: [{ name: string, nickname: string }]
+// 2. 群聊下拉选择项，显示 nickname，存储 nickname
+// TODO: 后续细化类型
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const fetchChatGroups = async (): Promise<{ name: string, nickname: string }[]> => {
   try {
     const response = await syncAPI.getChatrooms();
-    if (response.success && response.data) {
-      return response.data.map((room: Chatroom) => room.name);
+    // 兼容后端返回结构
+    if (response.success && Array.isArray(response.data)) {
+      return response.data.map((room: any) => ({
+        name: room.name || '',
+        nickname: room.nickname || room.name || '',
+      }));
+    }
+    // 兼容mock_data
+    if (response.mock_data && Array.isArray(response.mock_data)) {
+      return response.mock_data.map((room: any) => ({
+        name: room.name || '',
+        nickname: room.nickname || room.name || '',
+      }));
     }
     return [];
   } catch (error) {
@@ -159,14 +153,13 @@ const fetchChatGroups = async (): Promise<string[]> => {
 };
 
 function ProjectsPage() {
-  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form] = Form.useForm();
-  const [chatGroups, setChatGroups] = useState<string[]>([]);
+  const [chatGroups, setChatGroups] = useState<{ name: string, nickname: string }[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
 
   // 新增状态：控制显示'active'（执行中）或'archived'（已结束）项目
@@ -190,6 +183,9 @@ function ProjectsPage() {
   const [syncModalVisible, setSyncModalVisible] = useState(false); // 控制同步确认弹窗显示
   const [syncRange, setSyncRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null); // 同步时间区间
   const [syncTargetProject, setSyncTargetProject] = useState<Project | null>(null); // 当前待同步的项目
+
+  // 新增：用于记录当前正在删除的项目ID，实现删除按钮loading
+  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
 
   // 获取项目列表
   const fetchProjects = async () => {
@@ -218,6 +214,8 @@ function ProjectsPage() {
   };
 
   // 获取员工列表 (新增)
+  // TODO: 后续细化类型
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchEmployees = async () => {
     const response = await employeeAPI.getEmployees();
     if (response.success && response.data) {
@@ -318,23 +316,33 @@ function ProjectsPage() {
     }
   };
 
-  // 删除项目
+  // 删除项目（增加loading和详细错误提示）
   const handleDeleteProject = async (id: number) => {
+    setDeletingProjectId(id); // 设置loading
     try {
       const response = await projectAPI.deleteProject(id);
       if (response.success) {
         message.success('项目已成功删除');
         fetchProjects();
       } else {
-        message.error(response.error || '项目删除失败');
+        // 删除失败，弹窗详细提示
+        Modal.error({
+          title: '删除失败',
+          content: response.error || '项目删除失败',
+        });
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('删除项目失败:', error);
-      message.error('删除项目失败');
+      Modal.error({
+        title: '删除失败',
+        content: (error instanceof Error ? error.message : '项目删除失败'),
+      });
+    } finally {
+      setDeletingProjectId(null); // 取消loading
     }
   };
 
-  // 显示删除确认 (新增)
+  // 显示删除确认弹窗，支持loading
   const showDeleteConfirm = (project: Project) => {
     Modal.confirm({
       title: '您确定要删除吗？',
@@ -350,6 +358,8 @@ function ProjectsPage() {
       okText: '确认删除',
       okType: 'danger',
       cancelText: '取消',
+      // @ts-expect-error AntD Modal.confirm类型不支持confirmLoading，但实际运行无问题
+      confirmLoading: deletingProjectId === project.id, // loading反馈
       onOk() {
         return handleDeleteProject(project.id);
       },
@@ -625,6 +635,8 @@ function ProjectsPage() {
                     size="small"
                     style={{ position: 'absolute', top: 16, right: 16, border: 'none', background: 'transparent', zIndex: 10 }}
                     onClick={() => showDeleteConfirm(project)}
+                    loading={deletingProjectId === project.id}
+                    aria-label="删除项目"
                   />
                   <Space align="center" style={{ marginBottom: 24 }}>
                     <Badge color={healthConfig.color} />
@@ -739,10 +751,19 @@ function ProjectsPage() {
           >
             <Select
               mode="tags"
+              showSearch
+              allowClear
               style={{ width: '100%' }}
-              placeholder="输入或选择内部群聊，可输入多个"
+              placeholder="输入或选择内部群聊昵称，可输入多个"
               tokenSeparators={[',']}
-              options={chatGroups.map(group => ({ value: group, label: group }))}
+              options={chatGroups.map(group => ({ value: group.nickname, label: group.nickname }))}
+              onChange={vals => {
+                // 校验输入的群昵称是否在 chatGroups 列表中
+                const notFound = (vals as string[]).filter(val => !chatGroups.some(g => g.nickname === val));
+                if (notFound.length > 0) {
+                  message.warning(`群聊不存在：${notFound.join('，')}，请检查拼写或先在微信创建该群聊`);
+                }
+              }}
             />
           </Form.Item>
 
@@ -752,10 +773,18 @@ function ProjectsPage() {
           >
             <Select
               mode="tags"
+              showSearch
+              allowClear
               style={{ width: '100%' }}
-              placeholder="输入或选择外部客户群，可输入多个"
+              placeholder="输入或选择外部群聊昵称，可输入多个"
               tokenSeparators={[',']}
-              options={chatGroups.map(group => ({ value: group, label: group }))}
+              options={chatGroups.map(group => ({ value: group.nickname, label: group.nickname }))}
+              onChange={vals => {
+                const notFound = (vals as string[]).filter(val => !chatGroups.some(g => g.nickname === val));
+                if (notFound.length > 0) {
+                  message.warning(`群聊不存在：${notFound.join('，')}，请检查拼写或先在微信创建该群聊`);
+                }
+              }}
             />
           </Form.Item>
 
@@ -816,7 +845,7 @@ function ProjectsPage() {
             <Descriptions.Item label="新增消息数">{syncResult.total_messages}</Descriptions.Item>
             <Descriptions.Item label="新增文件数">{syncResult.total_files}</Descriptions.Item>
             <Descriptions.Item label="详细信息">
-              {syncResult.details.map((detail, i) => (
+              {syncResult.details.map((detail: any, i: number) => (
                 <Tag key={i} color={detail.status === 'success' ? 'green' : 'red'}>
                   {detail.chatroom_name}: {detail.status}
                 </Tag>

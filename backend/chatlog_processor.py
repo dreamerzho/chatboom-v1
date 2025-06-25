@@ -170,132 +170,110 @@ class ChatLogProcessor:
         self._log(f"成功加载 {len(employee_list)} 条员工信息。")
         return employee_list
 
-    def get_chatlog_filenames(self) -> Dict[str, List[str]]:
-        """根据项目ID获取对应的聊天记录文件名"""
-        project = Project.query.get(self.project_id)
-        if not project:
-            self._log(f"错误：找不到ID为 {self.project_id} 的项目。")
-            return {}
-
-        self._log(f"开始为项目 '{project.project_name}' 查找聊天记录文件...")
-        
-        # 严格按 chatrooms 结构分类
-        chatrooms = getattr(project, 'chatrooms', [])
-        internal_chat_groups = [c.chatroom_name for c in chatrooms if getattr(c, 'chatroom_type', '') == '内部群聊']
-        external_chat_groups = [c.chatroom_name for c in chatrooms if getattr(c, 'chatroom_type', '') == '外部群聊']
-        chat_groups = {
-            'internal': internal_chat_groups,
-            'external': external_chat_groups
-        }
-        
-        filenames = {'internal': [], 'external': []}
-        
-        # 确保基础路径存在
-        if not os.path.isdir(CHATLOG_BASE_PATH):
-            self._log(f"错误：聊天记录基础路径 {CHATLOG_BASE_PATH} 不存在或不是一个目录。")
-            return {}
-
-        all_files = [f for f in os.listdir(CHATLOG_BASE_PATH) if f.endswith('.txt')]
-        self._log(f"在 {CHATLOG_BASE_PATH} 中找到 {len(all_files)} 个 .txt 文件。")
-
-        for group_type, groups in chat_groups.items():
-            for group_name in groups:
-                found = False
-                for filename in all_files:
-                    if group_name in filename:
-                        filenames[group_type].append(filename)
-                        self._log(f"  - 匹配成功 ({group_type}): 群聊 '{group_name}' -> 文件 '{filename}'")
-                        found = True
-                if not found:
-                     self._log(f"  - 匹配失败 ({group_type}): 未找到与群聊 '{group_name}' 相关的文件。")
-
-        return filenames
-
-    def load_and_parse_chatlog_file(self, filename: str) -> List[Dict[str, Any]]:
-        """加载并解析单个聊天记录文件"""
-        full_path = os.path.join(CHATLOG_BASE_PATH, filename)
-        self._log(f"正在读取文件: {full_path}")
-        
-        try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                # 假设文件内容是JSON数组
-                data = json.load(f)
-                if isinstance(data, list):
-                    self._log(f"文件 '{filename}' 读取成功，包含 {len(data)} 条记录。")
-                    return data
-                else:
-                    self._log(f"文件 '{filename}' 格式错误：内容不是一个JSON列表。")
-                    return []
-        except FileNotFoundError:
-            self._log(f"错误：文件不存在 {full_path}")
-            return []
-        except json.JSONDecodeError as e:
-            self._log(f"错误：解析文件 {filename} JSON失败: {e}")
-            return []
-        except Exception as e:
-            self._log(f"错误：读取文件 {filename} 时发生未知错误: {e}")
-            return []
-
     def process_chatlogs(self) -> Dict[str, Any]:
         """
-        主处理流程
-        1. 获取文件名 -> 2. 读取文件 -> 3. 解析和处理 -> 4. 保存到数据库
+        处理并同步项目的聊天记录（只通过chatlogAPI获取）
+        步骤：
+        1. 读取项目的所有群昵称（chatroom_name），遍历每个群聊。
+        2. 对每个群聊，调用chatlogAPI拉取消息（get_chatlog_by_talker_and_time），按时间段。
+        3. 用process_and_deduplicate处理消息，批量入库ChatMessage和FileRecord。
+        4. 统计消息数、文件数，返回真实统计。
+        5. 日志详细，异常处理健壮。
         """
-        self._log(f"--- 开始处理项目ID: {self.project_id} 的聊天记录 ---")
-        filenames_by_type = self.get_chatlog_filenames()
-
-        if not any(filenames_by_type.values()):
-            self._log("未找到任何相关的聊天记录文件，处理中止。")
-            return {"success": False, "message": "未找到相关的聊天记录文件"}
+        from chatlog_integration import ChatlogIntegration
+        from models.project import Project, ProjectChatroom
+        from models.chat import ChatMessage
+        from models.file import FileRecord
+        from db import db
+        import traceback
         
-        all_messages = []
-        all_files = []
-
-        for group_type, filenames in filenames_by_type.items():
-            for filename in filenames:
-                chatlog_data = self.load_and_parse_chatlog_file(filename)
-                if not chatlog_data:
-                    continue
-
-                group_info = {'type': group_type, 'name': os.path.splitext(filename)[0]}
-                
-                processed_data = self.process_and_deduplicate(chatlog_data, group_info)
-                
-                messages_to_add = processed_data.get('chat_messages', [])
-                files_to_add = processed_data.get('file_records', [])
-
-                self._log(f"文件 '{filename}' 处理完成: 新增消息 {len(messages_to_add)}, 新增文件 {len(files_to_add)}")
-
-                all_messages.extend(messages_to_add)
-                all_files.extend(files_to_add)
-
-        # 批量保存到数据库
+        self._log(f"--- 开始处理项目ID: {self.project_id} 的聊天记录 ---")
         try:
-            if all_messages:
-                db.session.bulk_insert_mappings(ChatMessage, all_messages)
-                self._log(f"准备向数据库批量插入 {len(all_messages)} 条消息记录...")
+            project = Project.query.get(self.project_id)
+            if not project:
+                self._log(f"未找到项目ID: {self.project_id}")
+                return {'success': False, 'message': f'未找到项目ID: {self.project_id}', 'logs': []}
             
-            if all_files:
-                db.session.bulk_insert_mappings(FileRecord, all_files)
-                self._log(f"准备向数据库批量插入 {len(all_files)} 条文件记录...")
-
-            if all_messages or all_files:
+            # 获取所有群聊昵称
+            chatrooms = project.chatrooms.all()
+            if not chatrooms:
+                self._log(f"项目未配置任何群聊，无法同步")
+                return {'success': False, 'message': '项目未配置任何群聊', 'logs': []}
+            
+            chatlog_client = ChatlogIntegration()
+            total_messages = 0
+            total_files = 0
+            all_new_msgs = []
+            all_new_files = []
+            for chatroom in chatrooms:
+                group_name = chatroom.chatroom_name
+                group_type = chatroom.chatroom_type
+                self._log(f"同步群聊：{group_name}（类型：{group_type}）...")
+                # 拉取该群的所有消息
+                from datetime import datetime, timedelta
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+                msgs = chatlog_client.get_chatlog_by_talker_and_time(
+                    talker=group_name,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                self._log(f"获取到 {len(msgs)} 条消息，开始解析...")
+                group_info = {'name': group_name, 'type': group_type}
+                result = self.process_and_deduplicate(msgs, group_info)
+                # 批量入库消息
+                for msg in result['chat_messages']:
+                    try:
+                        chatmsg = ChatMessage(
+                            project_id=self.project_id,
+                            talker_name=group_name,  # 保证与详情页API一致
+                            sender_name=msg['sender_nickname'],
+                            message_type=msg['message_type'],
+                            content=msg['content'],
+                            timestamp=msg['message_time']
+                        )
+                        db.session.add(chatmsg)
+                        total_messages += 1
+                        all_new_msgs.append(chatmsg)
+                    except Exception as e:
+                        self._log(f"消息入库失败: {e}")
+                        continue
+                # 批量入库文件
+                for file in result['file_records']:
+                    try:
+                        filerec = FileRecord(
+                            project_id=self.project_id,
+                            project_name=project.project_name,
+                            chatroom_name=group_name,  # 保证与详情页API一致
+                            original_name=file['filename'],
+                            standardized_name=file['filename'],
+                            author_abbreviation=file['parsed_author_abbreviation'] or '',
+                            version=file['parsed_version'] or '',
+                            file_extension=file['file_type'] or '',
+                            upload_time=file['upload_time'],
+                            uploader=str(file['uploader_id']) if file['uploader_id'] else '',
+                            status='pending'
+                        )
+                        db.session.add(filerec)
+                        total_files += 1
+                        all_new_files.append(filerec)
+                    except Exception as e:
+                        self._log(f"文件入库失败: {e}")
+                        continue
                 db.session.commit()
-                self._log("数据已成功提交到数据库。")
-            else:
-                self._log("没有新的数据需要提交到数据库。")
-                
+                self._log(f"群聊 {group_name} 入库消息 {len(result['chat_messages'])} 条，文件 {len(result['file_records'])} 条。")
+            self._log(f"全部群聊同步完成。共入库消息 {total_messages} 条，文件 {total_files} 条。")
+            return {
+                'success': True,
+                'message': f'同步完成，消息 {total_messages} 条，文件 {total_files} 条',
+                'total_messages': total_messages,
+                'total_files': total_files,
+                'logs': []
+            }
         except Exception as e:
+            self._log(f"同步过程发生异常: {e}\n{traceback.format_exc()}")
             db.session.rollback()
-            self._log(f"数据库操作失败: {e}")
-            return {"success": False, "message": f"数据库操作失败: {e}"}
-
-        summary = {
-            "total_new_messages": len(all_messages),
-            "total_new_files": len(all_files)
-        }
-        self._log(f"--- 项目ID: {self.project_id} 处理完成。总结: {summary} ---")
-        return {"success": True, "summary": summary}
+            return {'success': False, 'message': f'同步异常: {e}', 'logs': []}
     
     def _associate_employee(self, sender_name: str, group_type: str = 'unknown') -> Tuple[Optional[int], str]:
         if not sender_name:
@@ -420,8 +398,14 @@ class ChatLogProcessor:
             return None
 
         components = self._parse_filename_components(filename)
-        
-        timestamp = datetime.fromtimestamp(parsed_message.get('time', 0))
+        # 兼容time为字符串或数字
+        raw_time = parsed_message.get('time', 0)
+        if isinstance(raw_time, str):
+            try:
+                raw_time = float(raw_time)
+            except Exception:
+                raw_time = 0
+        timestamp = datetime.fromtimestamp(raw_time)
 
         return {
             'project_id': self.project_id,
@@ -443,11 +427,24 @@ class ChatLogProcessor:
         """
         创建聊天消息记录
         """
-        timestamp = datetime.fromtimestamp(parsed_message.get('time', 0))
+        from datetime import datetime
+        time_val = parsed_message.get('time', 0)
+        if isinstance(time_val, (int, float)):
+            timestamp = datetime.fromtimestamp(time_val)
+        elif isinstance(time_val, str):
+            try:
+                timestamp = datetime.fromisoformat(time_val.replace('Z', '+00:00'))
+            except Exception:
+                try:
+                    timestamp = datetime.strptime(time_val, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    timestamp = datetime.utcnow()
+        else:
+            timestamp = datetime.utcnow()
 
         return {
             'project_id': self.project_id,
-            'message_seq': parsed_message.get('seq'),
+            'message_id': parsed_message.get('seq'),
             'message_time': timestamp,
             'sender_id': employee_id,
             'sender_role': role,
@@ -469,9 +466,10 @@ class ChatLogProcessor:
         # 首先检查数据库中已存在的seq
         seqs_in_log = [msg.get('seq') for msg in chatlog if msg.get('seq')]
         if seqs_in_log:
-            existing_seqs = db.session.query(ChatMessage.message_seq).filter(
+            seqs_in_log_str = [str(seq) for seq in seqs_in_log]
+            existing_seqs = db.session.query(ChatMessage.message_id).filter(
                 ChatMessage.project_id == self.project_id,
-                ChatMessage.message_seq.in_(seqs_in_log)
+                ChatMessage.message_id.in_(seqs_in_log_str)
             ).all()
             processed_seqs = {seq[0] for seq in existing_seqs}
             self._log(f"在数据库中找到 {len(processed_seqs)} 条已存在的记录，将跳过处理。")

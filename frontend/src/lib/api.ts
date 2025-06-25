@@ -255,6 +255,14 @@ export const projectAPI = {
     return response;
   },
 
+  // 获取项目详情
+  getProjectDetail: (id: string | number) =>
+    apiRequest(`/api/v1/projects/${id}`),
+
+  // 获取项目文件列表
+  getProjectFiles: (projectName: string) =>
+    apiRequest(`/api/v1/files/list?project_name=${encodeURIComponent(projectName)}`),
+
   // 添加新项目
   addProject: (projectData: any) =>
     apiRequest('/api/v1/projects/', {
