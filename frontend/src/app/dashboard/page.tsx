@@ -16,58 +16,6 @@ import { Bar, Line } from '@ant-design/plots';
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
 
-// --- 模拟数据 ---
-
-const mockData = {
-  user: {
-    name: '秦若否',
-    avatar: 'https://i.pravatar.cc/150?img=1'
-  },
-  kpi: {
-    team_load: { high: 3, medium: 75, low: 9 },
-    project_health: { healthy: 1, warning: 1, risk: 1 },
-    pending_risks: 7,
-    avg_finalize_hours: {
-      value: 48.5,
-      change: -0.05, // -5%
-      trend: [12, 15, 13, 18, 16, 20, 19]
-    }
-  },
-  workload_trend: [
-    { date: '06-13', value: 25, type: '总计WE' }, { date: '06-14', value: 30, type: '总计WE' },
-    { date: '06-15', value: 28, type: '总计WE' }, { date: '06-16', value: 35, type: '总计WE' },
-    { date: '06-17', value: 45, type: '总计WE' }, { date: '06-18', value: 42, type: '总计WE' },
-    { date: '06-19', value: 50, type: '总计WE' },
-    { date: '06-13', value: 5, type: '过程成本WE' }, { date: '06-14', value: 8, type: '过程成本WE' },
-    { date: '06-15', value: 7, type: '过程成本WE' }, { date: '06-16', value: 10, type: '过程成本WE' },
-    { date: '06-17', value: 15, type: '过程成本WE' }, { date: '06-18', value: 12, type: '过程成本WE' },
-    { date: '06-19', value: 18, type: '过程成本WE' },
-  ],
-  risk_feed: [
-    { id: '1', type: 'danger', project: 'SKP项目', description: '主视觉海报已迭代8次', time: '2小时前' },
-    { id: '2', type: 'warning', project: '越城天地', description: '内部群提及"又要改"', time: '5小时前' },
-    { id: '3', type: 'danger', project: '王五', description: '在【SKP项目】的迭代次数高于其个人基线70%', time: '1天前' },
-  ],
-  team_performance: {
-    design: [
-      { key: '1', employee: '张三', output_we: 12.5, process_we: 3.2, avg_iteration: 2.1 },
-      { key: '2', employee: '王五', output_we: 8.0, process_we: 2.5, avg_iteration: 5.8 },
-    ],
-    copywriting: [
-      { key: '1', employee: '李四', output_we: 10.2, process_we: 1.8, avg_iteration: 1.5 },
-    ],
-    pm_ae: [
-       { key: '1', employee: '赵六', output_we: 15.0, process_we: 4.1, avg_iteration: 1.2 },
-    ]
-  },
-  project_risks: [
-    { key: '1', project: 'SKP项目', health_score: 45, main_risk: '迭代次数过高' },
-    { key: '2', project: '越城天地', health_score: 68, main_risk: '定稿周期长' },
-    { key: '3', project: '金陵中环', health_score: 92, main_risk: '-' },
-  ]
-};
-
-
 // --- 组件定义 ---
 
 // 团队效能榜表格列定义
@@ -122,7 +70,7 @@ function DashboardPageV2() {
 
   // 主图表配置
   const workloadChartConfig = {
-    data: mockData.workload_trend,
+    data: [],
     isGroup: true,
     xField: 'date',
     yField: 'value',
@@ -145,7 +93,7 @@ function DashboardPageV2() {
   const tinyLineConfig = {
     height: 60,
     autoFit: true,
-    data: mockData.kpi.avg_finalize_hours.trend,
+    data: [],
     smooth: true,
     xAxis: false,
     yAxis: false,
@@ -182,8 +130,8 @@ function DashboardPageV2() {
                 </Space>
               </a>
             </Dropdown>
-            <Avatar src={mockData.user.avatar} />
-            <Text>{mockData.user.name}</Text>
+            <Avatar src="https://i.pravatar.cc/150?img=1" />
+            <Text>秦若否</Text>
           </Space>
         </Col>
       </Row>
@@ -196,11 +144,11 @@ function DashboardPageV2() {
               title="团队负荷状态"
               valueRender={() => (
                 <Space size="small">
-                  <Text style={{ fontSize: 30, color: '#cf1322', fontWeight: 600 }}>{mockData.kpi.team_load.high}</Text>
+                  <Text style={{ fontSize: 30, color: '#cf1322', fontWeight: 600 }}>3</Text>
                   <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
-                  <Text style={{ fontSize: 30, fontWeight: 600 }}>{mockData.kpi.team_load.medium}</Text>
+                  <Text style={{ fontSize: 30, fontWeight: 600 }}>75</Text>
                   <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
-                  <Text style={{ fontSize: 30, color: '#3f8600', fontWeight: 600 }}>{mockData.kpi.team_load.low}</Text>
+                  <Text style={{ fontSize: 30, color: '#3f8600', fontWeight: 600 }}>9</Text>
                 </Space>
               )}
             />
@@ -213,11 +161,11 @@ function DashboardPageV2() {
               title="项目健康度"
               valueRender={() => (
                 <Space size="small">
-                  <Text style={{ fontSize: 30, color: '#3f8600', fontWeight: 600 }}>{mockData.kpi.project_health.healthy}</Text>
+                  <Text style={{ fontSize: 30, color: '#3f8600', fontWeight: 600 }}>1</Text>
                   <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
-                  <Text style={{ fontSize: 30, color: '#faad14', fontWeight: 600 }}>{mockData.kpi.project_health.warning}</Text>
+                  <Text style={{ fontSize: 30, color: '#faad14', fontWeight: 600 }}>1</Text>
                   <Text style={{ fontSize: 24, color: '#666' }}>/</Text>
-                  <Text style={{ fontSize: 30, color: '#cf1322', fontWeight: 600 }}>{mockData.kpi.project_health.risk}</Text>
+                  <Text style={{ fontSize: 30, color: '#cf1322', fontWeight: 600 }}>1</Text>
                 </Space>
               )}
             />
@@ -228,7 +176,7 @@ function DashboardPageV2() {
           <Card bordered={false}>
             <Statistic 
               title="待处理风险"
-              value={mockData.kpi.pending_risks}
+              value={7}
               valueStyle={{ fontSize: 30, fontWeight: 600 }}
             />
             <Text type="secondary">个高优先级事项</Text>
@@ -240,14 +188,12 @@ function DashboardPageV2() {
                 <Col span={12}>
                     <Statistic
                       title="平均定稿周期"
-                      value={mockData.kpi.avg_finalize_hours.value}
+                      value={48.5}
                       precision={1}
                       valueStyle={{ fontSize: 30, fontWeight: 600 }}
                       suffix="小时"
                     />
-                    <Text type={mockData.kpi.avg_finalize_hours.change < 0 ? 'success' : 'danger'}>
-                      比上周 {mockData.kpi.avg_finalize_hours.change * 100}%
-                    </Text>
+                    <Text type="-">-0.05%</Text>
                 </Col>
                 <Col span={12}>
                     <Line {...tinyLineConfig} />
@@ -270,7 +216,7 @@ function DashboardPageV2() {
           <Card bordered={false} title={<Title level={4}>实时风险流</Title>} style={{height: '100%'}}>
               <List
                 itemLayout="horizontal"
-                dataSource={mockData.risk_feed}
+                dataSource={[]}
                 renderItem={item => (
                   <List.Item>
                     <List.Item.Meta
@@ -293,21 +239,21 @@ function DashboardPageV2() {
                 <TabPane tab="设计" key="1">
                     <Table 
                         columns={performanceColumns.map(c => c.key === 'employee' ? {...c, title: '设计师'} : c)} 
-                        dataSource={mockData.team_performance.design} 
+                        dataSource={[]} 
                         pagination={false}
                     />
                 </TabPane>
                 <TabPane tab="文案" key="2">
                     <Table 
                         columns={performanceColumns.map(c => c.key === 'employee' ? {...c, title: '文案'} : c)} 
-                        dataSource={mockData.team_performance.copywriting} 
+                        dataSource={[]} 
                         pagination={false}
                     />
                 </TabPane>
                 <TabPane tab="PM/AE" key="3">
                      <Table 
                         columns={performanceColumns.map(c => c.key === 'employee' ? {...c, title: 'PM/AE'} : c)} 
-                        dataSource={mockData.team_performance.pm_ae} 
+                        dataSource={[]} 
                         pagination={false}
                     />
                 </TabPane>
@@ -316,7 +262,7 @@ function DashboardPageV2() {
               </Col>
         <Col xs={24} lg={12}>
           <Card bordered={false} title={<Title level={4}>项目风险榜</Title>}>
-             <Table columns={riskColumns} dataSource={mockData.project_risks} pagination={false} />
+             <Table columns={riskColumns} dataSource={[]} pagination={false} />
           </Card>
         </Col>
       </Row>

@@ -49,42 +49,6 @@ interface ProjectPerformance {
   time_to_final: number; // 平均定稿周期(小时)
 }
 
-
-// --- 模拟数据 ---
-const mockEmployeeDatabase: Record<string, EmployeeDetails> = {
-  '1': {
-    id: 1,
-    real_name: '张三',
-    position: '设计',
-    avatar: 'https://i.pravatar.cc/150?img=1',
-    personal_avg_revisions: 2.5,
-    load_index: 15.7,
-    final_output_we: 12.5,
-    process_cost_we: 3.2,
-    project_performance: [
-      { key: 'p1', project_name: '越城天地', current_project_revisions: 2, revision_health_vs_baseline: -0.2, time_to_final: 48 },
-      { key: 'p2', project_name: '金陵中环', current_project_revisions: 4, revision_health_vs_baseline: 0.6, time_to_final: 96 },
-    ]
-  },
-  '4': {
-    id: 4,
-    real_name: '赵六',
-    position: 'PM',
-    avatar: 'https://i.pravatar.cc/150?img=4',
-    personal_avg_revisions: 0, // PM不考核迭代
-    load_index: 11.0,
-    management_we: 4.5,
-    communication_we: 5.5,
-    strategy_we: 1.0,
-    project_performance: [
-      { key: 'p1', project_name: '越城天地', current_project_revisions: 0, revision_health_vs_baseline: 0, time_to_final: 48 },
-      { key: 'p2', project_name: '金陵中环', current_project_revisions: 0, revision_health_vs_baseline: 0, time_to_final: 96 },
-      { key: 'p3', project_name: 'SKP项目', current_project_revisions: 0, revision_health_vs_baseline: 0, time_to_final: 72 },
-    ]
-  }
-};
-
-
 // 页面组件
 export default function EmployeeDetailPage() {
   const router = useRouter();
@@ -100,12 +64,8 @@ export default function EmployeeDetailPage() {
       setLoading(true);
       // 模拟API调用
       setTimeout(() => {
-        const data = mockEmployeeDatabase[id as string];
-        if (data) {
-          setEmployee(data);
-        } else {
-          setError('找不到该员工的信息');
-        }
+        // 这里应该改为实际的API调用逻辑
+        setError('找不到该员工的信息');
         setLoading(false);
       }, 500);
     }

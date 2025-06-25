@@ -6,6 +6,7 @@ from .project import Project, ProjectChatroom
 from .file import FileRecord, FileVersion
 from .chat import ChatMessage
 from .keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKeyword
+from .risk_event import RiskEvent
 
 __all__ = [
     'EmployeeMapping',
@@ -17,5 +18,6 @@ __all__ = [
     'KeywordCategory',
     'Keyword',
     'KeywordAnalysis',
-    'MessageKeyword'
+    'MessageKeyword',
+    'RiskEvent'
 ] 

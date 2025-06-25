@@ -14,6 +14,9 @@ from utils import APIResponse, ValidationHelper, PaginationHelper
 from models.employee import EmployeeMapping
 from models.workload import WorkloadRecord
 from models.risk_event import RiskEvent
+import io
+import pandas as pd
+from werkzeug.utils import secure_filename
 
 # 创建员工管理蓝图
 employees_bp = Blueprint('employees', __name__, url_prefix='/api/v1/employees')
@@ -298,22 +301,61 @@ def batch_add_unmapped_senders():
 @employees_bp.route('/batch-import', methods=['POST'])
 def batch_import_employees():
     """
-    批量导入员工映射
-    请求体: JSON格式，包含 employees 数组
-    返回: 批量导入结果，标准化响应格式
+    批量导入员工信息API
+    - 支持Excel/CSV文件上传，或直接粘贴表格数据（JSON）
+    - 字段：微信昵称、真实姓名、岗位、姓名缩写
+    - 返回每条数据的导入状态（成功/失败/重复/格式错误等）
     """
     try:
-        data = request.get_json()
-        if not data or 'employees' not in data:
-            return APIResponse.validation_error(["缺少employees参数"])
-        employees = data['employees']
-        if not isinstance(employees, list):
-            return APIResponse.validation_error(["employees必须为数组"])
-        result = data_manager.batch_import_employees(employees)
-        return APIResponse.success(data=result, message="批量导入员工成功")
+        # 判断是文件上传还是表格粘贴
+        if 'file' in request.files:
+            file = request.files['file']
+            filename = secure_filename(file.filename)
+            if filename.endswith('.csv'):
+                df = pd.read_csv(file)
+            elif filename.endswith('.xls') or filename.endswith('.xlsx'):
+                df = pd.read_excel(file)
+            else:
+                return jsonify({'success': False, 'error': '仅支持Excel/CSV文件'}), 400
+        else:
+            # 直接粘贴表格数据，前端应以JSON格式传递
+            data = request.get_json()
+            if not data or 'rows' not in data:
+                return jsonify({'success': False, 'error': '缺少表格数据'}), 400
+            df = pd.DataFrame(data['rows'])
+        # 校验字段
+        required_fields = ['微信昵称', '真实姓名', '岗位', '姓名缩写']
+        for field in required_fields:
+            if field not in df.columns:
+                return jsonify({'success': False, 'error': f'缺少字段: {field}'}), 400
+        # 批量插入数据库
+        results = []
+        for _, row in df.iterrows():
+            nickname = str(row['微信昵称']).strip()
+            real_name = str(row['真实姓名']).strip()
+            position = str(row['岗位']).strip()
+            abbr = str(row['姓名缩写']).strip()
+            # 校验必填
+            if not (nickname and real_name and position and abbr):
+                results.append({'微信昵称': nickname, '状态': '失败', '原因': '字段缺失'})
+                continue
+            # 检查重复
+            exists = EmployeeMapping.query.filter_by(wechat_nickname=nickname).first()
+            if exists:
+                results.append({'微信昵称': nickname, '状态': '失败', '原因': '微信昵称已存在'})
+                continue
+            # 插入
+            emp = EmployeeMapping(wechat_nickname=nickname, real_name=real_name, position=position, name_abbreviation=abbr)
+            db.session.add(emp)
+            try:
+                db.session.commit()
+                results.append({'微信昵称': nickname, '状态': '成功'})
+            except Exception as e:
+                db.session.rollback()
+                results.append({'微信昵称': nickname, '状态': '失败', '原因': str(e)})
+        return jsonify({'success': True, 'results': results})
     except Exception as e:
-        logger.error(f"批量导入员工失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @employees_bp.route('/export', methods=['GET'])
 def export_employees():

@@ -4,40 +4,41 @@
 
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, Row, Col, Typography, Table, Tag, Button, Breadcrumb } from 'antd';
 import { ArrowLeftOutlined, HomeOutlined } from '@ant-design/icons';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
+import { projectAPI } from '../../../lib/api';
 
 const { Title, Text } = Typography;
 
-// --- Mock Data (未来由API提供) ---
-const mockProject = {
-  id: 1,
-  name: '建杭-良渚项目',
-};
-
-// 员工贡献统计数据
-const mockEmployeeStats = [
-  { id: 1, name: '设计师A', position: '主创设计师', weScore: 45.5, files: 12, rework: 3 },
-  { id: 2, name: '设计师B', position: '设计师', weScore: 32.0, files: 8, rework: 1 },
-  { id: 3, name: '文案A', position: '文案策划', weScore: 28.0, files: 15, rework: 2 },
-  { id: 4, name: 'PM小王', position: '项目经理', weScore: 23.0, files: 5, rework: 0, remark: '主要负责沟通协调' },
-];
-
-// 高风险文件列表数据
-const mockHighReworkFiles = [
-  { id: 101, name: '主KV-客户修改.jpg', finalVersion: 'v4', submitter: '设计师A', lastModified: '2025-06-23', reworkCount: 4 },
-  { id: 102, name: '项目启动会PPT.pptx', finalVersion: 'v5', submitter: 'PM小王', lastModified: '2025-06-18', reworkCount: 5 },
-  { id: 105, name: '活动Slogan-v3.docx', finalVersion: 'v4', submitter: '文案A', lastModified: '2025-06-22', reworkCount: 4 },
-];
-
-
-const ReportPage = () => {
+export default function ProjectReportPage() {
   const router = useRouter();
   const params = useParams();
-  const { id } = params;
+  const projectId = params?.id;
+  const [project, setProject] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoading(true);
+    projectAPI.getProjectDetail(projectId)
+      .then(res => {
+        if (res.success && res.data) {
+          setProject(res.data);
+        } else {
+          setError(res.error || '未找到项目详情');
+        }
+      })
+      .catch(() => setError('获取项目详情失败'))
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  if (loading) return <div>加载中...</div>;
+  if (error) return <div style={{color:'red'}}>{error}</div>;
+  if (!project) return <div>未找到项目</div>;
 
   const employeeColumns = [
     { title: '员工姓名', dataIndex: 'name', key: 'name', render: (text: string) => <Text strong>{text}</Text> },
@@ -69,7 +70,7 @@ const ReportPage = () => {
                 <Breadcrumb.Item>
                   <Link href="/projects">项目视图</Link>
                 </Breadcrumb.Item>
-                <Breadcrumb.Item>{mockProject.name}</Breadcrumb.Item>
+                <Breadcrumb.Item>{project.project_name}</Breadcrumb.Item>
                 <Breadcrumb.Item>报告预览</Breadcrumb.Item>
               </Breadcrumb>
             <Button
@@ -82,7 +83,7 @@ const ReportPage = () => {
 
           <Card>
             <div style={{ textAlign: 'center', marginBottom: 40 }}>
-              <Title level={2}>项目报告: {mockProject.name}</Title>
+              <Title level={2}>项目报告: {project.project_name}</Title>
               <Text type="secondary">报告生成时间: {new Date().toLocaleString()}</Text>
             </div>
 
@@ -90,7 +91,7 @@ const ReportPage = () => {
             <Title level={4} style={{ marginBottom: 20 }}>员工贡献统计 (WE)</Title>
             <Table
               columns={employeeColumns}
-              dataSource={mockEmployeeStats}
+              dataSource={project.employee_stats}
               rowKey="id"
               pagination={false}
               summary={pageData => {
@@ -115,7 +116,7 @@ const ReportPage = () => {
             <Title level={4} style={{ marginTop: 40, marginBottom: 20 }}>高返工风险文件列表 (返工次数 > 3)</Title>
             <Table
               columns={fileColumns}
-              dataSource={mockHighReworkFiles}
+              dataSource={project.high_rework_files}
               rowKey="id"
               pagination={false}
             />
@@ -124,6 +125,4 @@ const ReportPage = () => {
       </Row>
     </div>
   );
-};
-
-export default ReportPage; 
+} 

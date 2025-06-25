@@ -19,6 +19,8 @@ from models.file import FileRecord
 from models.chat import ChatMessage
 from models.employee import EmployeeMapping
 from db import db
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import and_, or_
 
 logger = logging.getLogger(__name__)
 
@@ -221,45 +223,77 @@ class ChatLogProcessor:
                 self._log(f"获取到 {len(msgs)} 条消息，开始解析...")
                 group_info = {'name': group_name, 'type': group_type}
                 result = self.process_and_deduplicate(msgs, group_info)
-                # 批量入库消息
-                for msg in result['chat_messages']:
+                # 批量入库消息（使用 upsert 防止重复报错）
+                chat_messages = result['chat_messages']
+                if chat_messages:
                     try:
-                        chatmsg = ChatMessage(
-                            project_id=self.project_id,
-                            talker_name=group_name,  # 保证与详情页API一致
-                            sender_name=msg['sender_nickname'],
-                            message_type=msg['message_type'],
-                            content=msg['content'],
-                            timestamp=msg['message_time']
-                        )
-                        db.session.add(chatmsg)
-                        total_messages += 1
-                        all_new_msgs.append(chatmsg)
+                        # 构建插入语句，ON CONFLICT DO NOTHING
+                        insert_stmt = insert(ChatMessage).values([
+                            {
+                                'message_id': msg.get('message_id'),
+                                'project_id': self.project_id,
+                                'talker_name': group_name,
+                                'sender_name': msg['sender_nickname'],
+                                'message_type': msg['message_type'],
+                                'content': msg['content'],
+                                'timestamp': msg['message_time'],
+                                'created_at': datetime.utcnow(),
+                            }
+                            for msg in chat_messages
+                        ])
+                        do_nothing_stmt = insert_stmt.on_conflict_do_nothing(index_elements=['message_id'])
+                        db.session.execute(do_nothing_stmt)
+                        db.session.commit()
+                        total_messages += len(chat_messages)
+                        all_new_msgs.extend(chat_messages)
+                        self._log(f"群聊 {group_name} 批量入库消息 {len(chat_messages)} 条（已自动跳过重复消息）。")
                     except Exception as e:
-                        self._log(f"消息入库失败: {e}")
-                        continue
-                # 批量入库文件
-                for file in result['file_records']:
-                    try:
-                        filerec = FileRecord(
-                            project_id=self.project_id,
-                            project_name=project.project_name,
-                            chatroom_name=group_name,  # 保证与详情页API一致
-                            original_name=file['filename'],
-                            standardized_name=file['filename'],
-                            author_abbreviation=file['parsed_author_abbreviation'] or '',
-                            version=file['parsed_version'] or '',
-                            file_extension=file['file_type'] or '',
-                            upload_time=file['upload_time'],
-                            uploader=str(file['uploader_id']) if file['uploader_id'] else '',
-                            status='pending'
+                        db.session.rollback()
+                        self._log(f"消息批量入库失败: {e}")
+                # 批量入库文件（严格去重：同一 project_id + message_seq + original_name 只插入一次）
+                file_records = result['file_records']
+                if file_records:
+                    # 先查找数据库中已存在的文件（用 project_id, message_seq, original_name 去重）
+                    file_keys = [
+                        (self.project_id, file.get('group_name'), file.get('filename'))
+                        for file in file_records
+                    ]
+                    # 查询已存在的文件
+                    existing_files = db.session.query(FileRecord.project_id, FileRecord.chatroom_name, FileRecord.original_name).filter(
+                        or_(
+                            *[and_(FileRecord.project_id == pid, FileRecord.chatroom_name == gname, FileRecord.original_name == fname) for pid, gname, fname in file_keys]
                         )
-                        db.session.add(filerec)
-                        total_files += 1
-                        all_new_files.append(filerec)
-                    except Exception as e:
-                        self._log(f"文件入库失败: {e}")
-                        continue
+                    ).all()
+                    existing_set = set(existing_files)
+                    # 只保留未存在的文件
+                    new_file_records = [file for file in file_records if (self.project_id, file.get('group_name'), file.get('filename')) not in existing_set]
+                    if new_file_records:
+                        for file in new_file_records:
+                            try:
+                                filerec = FileRecord(
+                                    project_id=self.project_id,
+                                    project_name=project.project_name,
+                                    chatroom_name=file.get('group_name'),
+                                    original_name=file.get('filename'),
+                                    standardized_name=file.get('filename'),
+                                    author_abbreviation=file.get('parsed_author_abbreviation') or '',
+                                    version=file.get('parsed_version') or '',
+                                    file_extension=file.get('file_type') or '',
+                                    upload_time=file.get('upload_time'),
+                                    uploader=str(file.get('uploader_id')) if file.get('uploader_id') else '',
+                                    status='pending',
+                                    message_seq=file.get('message_seq') if file.get('message_seq') else None
+                                )
+                                db.session.add(filerec)
+                                total_files += 1
+                                all_new_files.append(filerec)
+                            except Exception as e:
+                                self._log(f"文件入库失败: {e}")
+                                continue
+                        db.session.commit()
+                        self._log(f"群聊 {group_name} 批量入库文件 {len(new_file_records)} 条（已自动跳过重复文件）。")
+                    else:
+                        self._log(f"群聊 {group_name} 本次无新文件需要入库，全部为已存在文件。")
                 db.session.commit()
                 self._log(f"群聊 {group_name} 入库消息 {len(result['chat_messages'])} 条，文件 {len(result['file_records'])} 条。")
             self._log(f"全部群聊同步完成。共入库消息 {total_messages} 条，文件 {total_files} 条。")

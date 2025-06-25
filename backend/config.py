@@ -15,7 +15,7 @@ class Config:
     POSTGRES_PORT = int(os.getenv('POSTGRES_PORT', 5432))
     POSTGRES_USER = os.getenv('POSTGRES_USER', 'postgres')
     POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'jxcb123')
-    POSTGRES_DB = os.getenv('POSTGRES_DB', 'postgres')
+    POSTGRES_DB = os.getenv('POSTGRES_DB', 'chat_monitoring_db')
     
     # 生成SQLAlchemy/PostgreSQL连接字符串
     SQLALCHEMY_DATABASE_URI = (

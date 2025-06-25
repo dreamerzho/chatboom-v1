@@ -3,7 +3,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Card, 
   List, 
@@ -60,7 +60,8 @@ interface Project {
   health_status?: 'good' | 'warning' | 'danger';
   negative_keywords_count?: number;
   total_files?: number;
-  rework_rate?: number; // 返工率
+  rework_rate?: number;
+  total_messages?: number;
 }
 
 // 员工接口 (新增)
@@ -103,15 +104,26 @@ interface SyncResult {
   timestamp: string;
 }
 
-// 计算项目健康状态
-const calculateHealthStatus = (project: Project): 'good' | 'warning' | 'danger' => {
-  if (project.negative_keywords_count && project.negative_keywords_count > 10) {
-    return 'danger';
-  } else if (project.negative_keywords_count && project.negative_keywords_count > 5) {
-    return 'warning';
-  }
-  return 'good';
-};
+// 定义项目详情类型
+interface ProjectDetail {
+  id: number;
+  project_name: string;
+  description: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  stats?: {
+    total_files?: number;
+    total_messages?: number;
+    rework_rate?: number;
+  };
+  health?: {
+    health_score?: number;
+  };
+  keywords?: {
+    negative_score?: number;
+  };
+}
 
 // 获取健康状态配置
 const getHealthStatusConfig = (status: 'good' | 'warning' | 'danger') => {
@@ -133,14 +145,7 @@ const fetchChatGroups = async (): Promise<{ name: string, nickname: string }[]> 
     const response = await syncAPI.getChatrooms();
     // 兼容后端返回结构
     if (response.success && Array.isArray(response.data)) {
-      return response.data.map((room: any) => ({
-        name: room.name || '',
-        nickname: room.nickname || room.name || '',
-      }));
-    }
-    // 兼容mock_data
-    if (response.mock_data && Array.isArray(response.mock_data)) {
-      return response.mock_data.map((room: any) => ({
+      return response.data.map((room: { name: string; nickname?: string }) => ({
         name: room.name || '',
         nickname: room.nickname || room.name || '',
       }));
@@ -187,27 +192,50 @@ function ProjectsPage() {
   // 新增：用于记录当前正在删除的项目ID，实现删除按钮loading
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
 
-  // 获取项目列表
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  // 获取项目列表并批量加载详情
   const fetchProjects = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      const response = await projectAPI.getProjects();
-      if (response.success && response.data) {
-        const projectsWithMockData = response.data.map((project: Project) => ({
-          ...project,
-          health_status: calculateHealthStatus(project),
-          rework_rate: Math.floor(Math.random() * 25), // 模拟返工率数据
-          total_files: project.total_files || Math.floor(Math.random() * 200) + 20, // 模拟文件总数
-          negative_keywords_count: project.negative_keywords_count || Math.floor(Math.random() * 40), // 模拟负面关键词
-        }));
-        setProjects(projectsWithMockData);
+      const res = await projectAPI.getProjects();
+      if (res.success && Array.isArray(res.data)) {
+        // 并发请求每个项目详情
+        const detailResults: { success: boolean; data?: ProjectDetail }[] = await Promise.all(
+          (res.data as Project[]).map((proj) => projectAPI.getProjectDetail(proj.id))
+        );
+        // 合并统计字段到项目卡片
+        const projectsWithStats: Project[] = (res.data as Project[]).map((proj, idx) => {
+          const detail = detailResults[idx];
+          if (detail.success && detail.data && detail.data.stats) {
+            const health_score = detail.data.health?.health_score;
+            let health_status: 'good' | 'warning' | 'danger' | undefined = undefined;
+            if (typeof health_score === 'number') {
+              if (health_score > 80) health_status = 'good';
+              else if (health_score > 60) health_status = 'warning';
+              else health_status = 'danger';
+            }
+            return {
+              ...proj,
+              ...detail.data.stats,
+              health_status,
+              negative_keywords_count: detail.data.keywords?.negative_score || 0,
+              rework_rate: detail.data.stats?.rework_rate || 0,
+              total_files: detail.data.stats?.total_files || 0,
+              total_messages: detail.data.stats?.total_messages || 0,
+            };
+          }
+          return proj;
+        });
+        setProjects(projectsWithStats);
       } else {
-        setError(response.error || '获取项目列表失败');
+        setProjects([]);
+        setError(res.error || '获取项目列表失败');
       }
-    } catch (err) {
-      console.error('获取项目列表失败:', err);
-      setError('获取项目列表失败，请检查网络连接');
+    } catch {
+      setError('获取项目数据失败');
+      setProjects([]);
     } finally {
       setLoading(false);
     }
@@ -417,7 +445,11 @@ function ProjectsPage() {
     setSyncModalVisible(true);
   };
 
-  // 3. 修改同步数据函数，接收时间段参数
+  /**
+   * 同步数据主函数
+   * @param project 当前同步的项目对象
+   * @param range 时间区间 [开始, 结束]
+   */
   const handleSyncData = async (project: Project, range: [dayjs.Dayjs, dayjs.Dayjs]) => {
     setSyncingProjectId(project.id);
     setCurrentSyncProject(project);
@@ -426,12 +458,10 @@ function ProjectsPage() {
     setSyncResult(null);
 
     try {
-      // 后端使用流式传输，所以用fetch API来处理
+      // 发起流式同步请求
       const response = await fetch(`/api/v1/sync/project/${project.id}/stream`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           start_date: range[0].format('YYYY-MM-DD'),
           end_date: range[1].format('YYYY-MM-DD'),
@@ -439,51 +469,51 @@ function ProjectsPage() {
           chatroom_names: [],
         }),
       });
-
       if (!response.ok || !response.body) {
         throw new Error(`服务器响应错误: ${response.status} ${response.statusText}`);
       }
-      
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
           setSyncLog(prev => [...prev, `[${dayjs().format('HH:mm:ss')}] 数据同步完成。`]);
           break;
         }
-        
         const chunk = decoder.decode(value, { stream: true });
-        // 后端可能一次发送多个事件，用 data: 分割
+        // 解析后端流式日志
         const lines = chunk.split('\n').filter(line => line.startsWith('data:'));
-
         for (const line of lines) {
-            const jsonString = line.substring(5); // 移除 "data:"
-            if (jsonString.trim()) {
-                const data = JSON.parse(jsonString);
-                if (data.type === 'log') {
-                  setSyncLog(prev => [...prev, `[${dayjs().format('HH:mm:ss')}] ${data.message}`]);
-                } else if (data.type === 'result') {
-                  setSyncResult(data.data);
-                  notification.success({
-                    message: '同步成功',
-                    description: `项目「${project.project_name}」数据已更新。`,
-                    placement: 'topRight',
-                  });
-                  fetchProjects(); // 同步成功后刷新项目数据
-                }
+          const jsonString = line.substring(5);
+          if (jsonString.trim()) {
+            try {
+              const data = JSON.parse(jsonString);
+              if (data.type === 'log') {
+                const logLines = data.message.split('\n');
+                setSyncLog(prev => [...prev, ...logLines.map((l: string) => `[${dayjs().format('HH:mm:ss')}] ${l}`)]);
+                setTimeout(() => { if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, 100);
+              } else if (data.type === 'result') {
+                setSyncResult(data.data);
+                notification.success({
+                  message: '同步成功',
+                  description: `项目「${project.project_name}」数据已更新。`,
+                  placement: 'topRight',
+                });
+                fetchProjects(); // 同步完成后刷新项目列表
+              }
+            } catch (err) {
+              setSyncLog(prev => [...prev, `[${dayjs().format('HH:mm:ss')}] 日志解析异常: ${err}`]);
             }
+          }
         }
       }
-
     } catch (error) {
-      console.error('同步失败:', error);
+      // 所有异常都详细输出到日志区和notification
       const errorMessage = `[${dayjs().format('HH:mm:ss')}] 同步失败: ${error instanceof Error ? error.message : '未知错误'}`;
       setSyncLog(prev => [...prev, errorMessage]);
       notification.error({
         message: '同步失败',
-        description: '无法连接到服务器或处理数据时发生错误。',
+        description: errorMessage,
         placement: 'topRight',
         duration: 0,
       });
@@ -502,6 +532,56 @@ function ProjectsPage() {
   useEffect(() => {
     fetchProjects();
   }, []);
+
+  // 1. 同步失败时日志区和抽屉顶部都显示明显错误提示
+  {syncResult === null && syncLog.some(log => log.includes('同步失败')) && (
+    <Alert
+      type="error"
+      showIcon
+      message="同步失败"
+      description="请检查网络或后端服务，详细错误见下方日志。"
+      style={{ marginBottom: 16 }}
+    />
+  )}
+
+  // 2. 同步成功后支持一键复制日志
+  {syncResult && (
+    <Button
+      style={{ marginBottom: 16 }}
+      onClick={() => {
+        navigator.clipboard.writeText(syncLog.join('\n'));
+        message.success('日志已复制到剪贴板');
+      }}
+    >
+      复制全部日志
+    </Button>
+  )}
+
+  // 1. 同步结果区支持导出为JSON
+  {syncResult && (
+    <Button
+      style={{ marginBottom: 16, marginLeft: 8 }}
+      onClick={() => {
+        const blob = new Blob([JSON.stringify(syncResult, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sync_result_${syncResult.project_id || 'project'}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        message.success('同步结果已导出为JSON');
+      }}
+    >
+      导出同步结果(JSON)
+    </Button>
+  )}
+
+  // 2. 同步完成后自动滚动到结果区
+  useEffect(() => {
+    if (syncResult && logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [syncResult]);
 
   // 加载状态
   if (loading) {
@@ -819,19 +899,10 @@ function ProjectsPage() {
       {/* 同步数据结果抽屉 */}
       <Drawer
         title={`项目同步详情: ${currentSyncProject?.project_name}`}
-        placement="right"
-        onClose={() => setSyncDrawerVisible(false)}
         open={syncDrawerVisible}
-        width={640}
+        onClose={() => setSyncDrawerVisible(false)}
+        width={600}
       >
-        <Title level={5}>同步日志</Title>
-        <Card style={{ marginBottom: 24, background: '#222', color: '#fff', height: 300, overflowY: 'auto' }}>
-          {syncLog.map((log, index) => (
-            <p key={index} style={{ margin: 0, fontFamily: 'monospace', fontSize: 12 }}>{log}</p>
-          ))}
-          {syncingProjectId && <Spin size="small" />}
-        </Card>
-
         <Title level={5}>同步结果</Title>
         {syncResult ? (
           <Descriptions bordered column={1}>
@@ -857,19 +928,24 @@ function ProjectsPage() {
         )}
       </Drawer>
 
-      {/* 5. 新增同步确认弹窗 UI */}
+      {/* 同步弹窗交互优化 */}
       <Modal
         title={`同步数据 - ${syncTargetProject?.project_name || ''}`}
         open={syncModalVisible}
-        onOk={() => {
+        onOk={async () => {
           if (syncTargetProject && syncRange) {
             setSyncModalVisible(false);
-            handleSyncData(syncTargetProject, syncRange);
+            setSyncingProjectId(syncTargetProject.id); // 按钮loading
+            await handleSyncData(syncTargetProject, syncRange);
+            setSyncingProjectId(null);
+          } else {
+            message.warning('请先选择同步时间范围');
           }
         }}
         onCancel={() => setSyncModalVisible(false)}
         okText="开始同步"
         cancelText="取消"
+        confirmLoading={!!syncingProjectId}
         destroyOnClose
       >
         <div style={{ marginBottom: 16 }}>
@@ -890,8 +966,17 @@ function ProjectsPage() {
           description="同步将根据所选时间段，抓取该项目关联群聊的所有聊天记录和文件。建议每次同步时间段不宜过长。"
         />
       </Modal>
+
+      {/* 日志区自动滚动到底部 */}
+      <Card style={{ marginBottom: 24, background: '#222', color: '#fff', height: 300, overflowY: 'auto' }}>
+        {syncLog.map((log: string, index: number) => (
+          <p key={index} style={{ margin: 0, fontFamily: 'monospace', fontSize: 12 }}>{log}</p>
+        ))}
+        {syncingProjectId && <Spin size="small" />}
+        <div ref={logEndRef} />
+      </Card>
     </div>
   );
 }
 
-export default ProjectsPage; 
+export default ProjectsPage;

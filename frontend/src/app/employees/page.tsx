@@ -29,7 +29,9 @@ import {
   Select,
   Avatar,
   Tag,
-  Tooltip
+  Tooltip,
+  Upload,
+  UploadProps,
 } from 'antd';
 import {
   PlusOutlined,
@@ -41,6 +43,7 @@ import {
 import { employeeAPI, unmatchedAPI, projectAPI } from '../../lib/api';
 import Link from 'next/link';
 import { TableProps } from 'antd';
+import * as XLSX from 'xlsx'; // 用于Excel解析
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -152,6 +155,13 @@ function EmployeesPage() {
   const [unmatchedLoading, setUnmatchedLoading] = useState(true);
   const [unmatchedListModalVisible, setUnmatchedListModalVisible] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [importedRows, setImportedRows] = useState<any[]>([]); // 解析后的表格数据
+  const [importStep, setImportStep] = useState<'select'|'preview'|'result'>('select');
 
   // --- 数据获取与处理 ---
 
@@ -172,29 +182,14 @@ function EmployeesPage() {
       let processedEmployees: EmployeeStat[] = [];
       if (employeeRes.success && Array.isArray(employeeRes.data)) {
         setEmployees(employeeRes.data);
-        // 数据处理与模拟
-        const projectNames = projectsRes.success && Array.isArray(projectsRes.data) 
-            ? projectsRes.data.map(p => p.project_name) 
-            : ['SKP项目', '越城天地', '金陵中环'];
-
-        processedEmployees = employeeRes.data.map(emp => {
-          // 模拟核心业务数据
-          const load_index = parseFloat((Math.random() * 10 + 8).toFixed(1)); // 模拟8-18之间的负荷指数
-          const avg_iteration = parseFloat((Math.random() * 5 + 1).toFixed(1)); // 模拟1-6之间的平均迭代
-          
-          // 模拟参与的项目
-          const numProjects = Math.floor(Math.random() * 3) + 1;
-          const projects = [...projectNames].sort(() => 0.5 - Math.random()).slice(0, numProjects);
-
-          return {
-            ...emp,
-            avatar: getRandomAvatar(emp.real_name),
-            load_index,
-            avg_iteration,
-            projects,
-          };
-        });
-        
+        // 只用API返回的数据，不再模拟负荷指数、平均迭代、项目等
+        processedEmployees = employeeRes.data.map(emp => ({
+          ...emp,
+          avatar: getRandomAvatar(emp.real_name),
+          load_index: emp.load_index || 0,
+          avg_iteration: emp.avg_iteration || 0,
+          projects: emp.projects || [],
+        }));
         setEmployeeStats(processedEmployees);
         setFilteredEmployeeStats(processedEmployees);
       } else {
@@ -527,6 +522,110 @@ function EmployeesPage() {
     });
   };
 
+  // 新增：批量导入按钮点击事件
+  const handleOpenImportModal = () => {
+    setImportModalVisible(true);
+    setImportResult(null);
+    setImportError(null);
+    setImportPreview([]);
+  };
+  // 新增：关闭批量导入弹窗
+  const handleCloseImportModal = () => {
+    setImportModalVisible(false);
+    setImportResult(null);
+    setImportError(null);
+    setImportPreview([]);
+  };
+
+  // 处理文件上传
+  const handleFileUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = new Uint8Array(e.target?.result as ArrayBuffer);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+      setImportedRows(jsonData);
+      setImportStep('preview');
+    };
+    reader.readAsArrayBuffer(file);
+    return false; // 阻止Upload自动上传
+  };
+
+  // 处理表格粘贴
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text');
+    // 按行分割
+    const rows = text.split(/\r?\n/).filter(row => row.trim() !== '');
+    // 按制表符或逗号分割
+    const data = rows.map(row => row.split(/\t|,/));
+    // 第一行为表头
+    const headers = data[0];
+    const jsonData = data.slice(1).map(row => {
+      const obj: any = {};
+      headers.forEach((h, i) => {
+        obj[h.trim()] = row[i] ? row[i].trim() : '';
+      });
+      return obj;
+    });
+    setImportedRows(jsonData);
+    setImportStep('preview');
+  };
+
+  // --- 新增：确认导入逻辑 ---
+  const handleImportConfirm = async () => {
+    if (!importedRows || importedRows.length === 0) {
+      message.error('没有可导入的数据');
+      return;
+    }
+    setImporting(true);
+    setImportError(null);
+    try {
+      // 字段映射：英文表头转为后端要求的中文表头
+      const fieldMap: Record<string, string> = {
+        wechat_nickname: '微信昵称',
+        real_name: '真实姓名',
+        position: '岗位',
+        name_abbr: '姓名缩写',
+        name_abbreviation: '姓名缩写', // 兼容部分导入
+      };
+      const mappedRows = importedRows.map((row: any) => {
+        const newRow: Record<string, string> = {};
+        Object.keys(fieldMap).forEach(key => {
+          if (row[key] !== undefined) {
+            newRow[fieldMap[key]] = row[key];
+          }
+        });
+        // 保证所有字段都存在
+        Object.values(fieldMap).forEach(cnKey => {
+          if (!newRow[cnKey]) newRow[cnKey] = '';
+        });
+        return newRow;
+      });
+      // 发送POST请求到后端批量导入API
+      const res = await fetch('/api/v1/employees/batch-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: mappedRows }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        message.success('导入成功');
+        setImportResult(result.results || []);
+        setImportStep('result');
+        fetchData(); // 刷新员工列表
+      } else {
+        setImportError(result.error || '导入失败');
+        message.error(result.error || '导入失败');
+      }
+    } catch (e) {
+      setImportError('网络错误');
+      message.error('网络错误');
+    }
+    setImporting(false);
+  };
+
   // --- 渲染 ---
   if (loading) {
     return (
@@ -574,6 +673,9 @@ function EmployeesPage() {
             <Col>
               <Space>
                 <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
+                <Button type="default" onClick={handleOpenImportModal}>
+                  批量导入
+                </Button>
                 <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
                   添加员工
                 </Button>
@@ -783,6 +885,106 @@ function EmployeesPage() {
                 <Input.TextArea rows={2} placeholder="可填写更多备注信息" />
             </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 新增：批量导入弹窗 */}
+      <Modal
+        title="批量导入员工"
+        open={importModalVisible}
+        onCancel={handleCloseImportModal}
+        footer={null}
+        width={600}
+        destroyOnClose
+      >
+        <Alert
+          message="功能说明"
+          description="您可以上传Excel/CSV文件，或直接粘贴表格数据，批量导入员工信息。支持字段：微信昵称、真实姓名、岗位、姓名缩写。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        {/* 文件上传区 */}
+        {importStep === 'select' && (
+          <div style={{ marginBottom: 16 }}>
+            <Upload
+              accept=".xlsx,.xls,.csv"
+              showUploadList={false}
+              beforeUpload={handleFileUpload}
+            >
+              <Button type="primary">选择Excel/CSV文件上传</Button>
+            </Upload>
+            <div style={{ margin: '16px 0', color: '#888' }}>或</div>
+            <textarea
+              style={{ width: '100%', minHeight: 80, resize: 'vertical', padding: 8, borderColor: '#d9d9d9' }}
+              placeholder="可直接粘贴表格（如从Excel复制）"
+              onPaste={handlePaste}
+            />
+            <div style={{ marginTop: 16, textAlign: 'right' }}>
+              <Button onClick={handleCloseImportModal}>取消</Button>
+            </div>
+          </div>
+        )}
+        {/* 预览区 */}
+        {importStep === 'preview' && (
+          <div>
+            <Alert message="请确认导入数据" type="info" showIcon style={{ marginBottom: 8 }} />
+            <div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid #eee', marginBottom: 16 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {importedRows.length > 0 && Object.keys(importedRows[0]).map(key => (
+                      <th key={key} style={{ border: '1px solid #eee', padding: 4, background: '#fafafa' }}>{key}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {importedRows.map((row, idx) => (
+                    <tr key={idx}>
+                      {Object.values(row).map((val, i) => (
+                        <td key={i} style={{ border: '1px solid #eee', padding: 4 }}>{val}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Space>
+              <Button onClick={() => setImportStep('select')}>返回</Button>
+              <Button type="primary" onClick={handleImportConfirm} loading={importing}>
+                确认导入
+              </Button>
+            </Space>
+          </div>
+        )}
+        {/* 导入结果区 */}
+        {importStep === 'result' && (
+          <div>
+            <Alert message="导入结果" type="success" showIcon style={{ marginBottom: 8 }} />
+            <div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid #eee', marginBottom: 16 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th>微信昵称</th>
+                    <th>状态</th>
+                    <th>原因</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importResult && importResult.map((row: any, idx: number) => (
+                    <tr key={idx}>
+                      <td>{row['微信昵称']}</td>
+                      <td>{row['状态']}</td>
+                      <td>{row['原因'] || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <Button type="primary" onClick={handleCloseImportModal}>关闭</Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 全局样式，用于高亮行 */}

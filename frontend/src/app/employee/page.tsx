@@ -4,6 +4,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import { employeeAPI } from '../../lib/api';
 
 // 定义员工详情类型
 interface EmployeeDetail {
@@ -28,58 +30,45 @@ interface Activity {
 }
 
 function EmployeePage() {
-  // 定义状态
+  const params = useParams();
+  const employeeId = params?.id ? Number(params.id) : null;
   const [employee, setEmployee] = useState<EmployeeDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 模拟数据加载
   useEffect(() => {
-    setLoading(true);
-    setTimeout(() => {
-      const mockEmployee: EmployeeDetail = {
-        id: 1,
-        real_name: '张三',
-        position: '设计师',
-        wechat_nickname: '设计师小张',
-        name_abbreviation: 'ZS',
-        join_date: '2023-01-15',
-        total_messages: 156,
-        total_files: 23,
-        compliant_files: 20,
-        recent_activities: [
-          {
-            id: 1,
-            type: 'file',
-            content: '240115-品牌设计-主视觉设计稿-2天-ZS-v1.0.psd',
-            time: '2024-01-15 14:30',
-            project_name: '品牌设计'
-          },
-          {
-            id: 2,
-            type: 'message',
-            content: '好的，我收到了设计需求，马上开始制作',
-            time: '2024-01-15 14:25'
-          },
-          {
-            id: 3,
-            type: 'file',
-            content: '240114-网站开发-图标设计-1天-ZS-v1.0.ai',
-            time: '2024-01-14 16:45',
-            project_name: '网站开发'
-          },
-          {
-            id: 4,
-            type: 'message',
-            content: '图标设计已完成，请查看',
-            time: '2024-01-14 16:40'
-          }
-        ]
-      };
-      setEmployee(mockEmployee);
+    if (!employeeId) {
+      setError('未指定员工ID');
       setLoading(false);
-    }, 1000);
-  }, []);
+      return;
+    }
+    setLoading(true);
+    employeeAPI.getEmployee(employeeId)
+      .then((res: { success: boolean; data?: any; error?: string }) => {
+        if (res.success && res.data) {
+          setEmployee({
+            id: res.data.id,
+            real_name: res.data.real_name,
+            position: res.data.position,
+            wechat_nickname: res.data.wechat_nickname,
+            name_abbreviation: res.data.name_abbreviation,
+            join_date: res.data.created_at || '',
+            total_messages: typeof res.data.total_messages === 'number' ? res.data.total_messages : 0,
+            total_files: typeof res.data.total_files === 'number' ? res.data.total_files : 0,
+            compliant_files: typeof res.data.compliant_files === 'number' ? res.data.compliant_files : 0,
+            recent_activities: Array.isArray(res.data.recent_activities) ? res.data.recent_activities : [],
+          });
+          setError(null);
+        } else {
+          setError(res.error || '未找到员工信息');
+        }
+        setLoading(false);
+      })
+      .catch((e: Error) => {
+        setError(e.message || '获取员工信息失败');
+      setLoading(false);
+      });
+  }, [employeeId]);
 
   return (
     <div style={{ padding: 24 }}>

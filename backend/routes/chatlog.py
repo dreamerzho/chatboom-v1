@@ -136,7 +136,7 @@ def import_chatlog():
                 
                 # 创建新的聊天消息记录
                 new_message = ChatMessage(
-                    message_id=msg_data.get('id'),
+                    message_id=msg_data.get('id') or msg_data.get('seq'),  # 修复：确保唯一标识赋值
                     talker_name=msg_data.get('talkerName'),
                     sender_name=msg_data.get('senderName'),
                     timestamp=timestamp,

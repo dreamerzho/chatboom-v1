@@ -641,16 +641,17 @@ def sync_project_data_by_id(project_id: int):
                             existing_msg = ChatMessage.query.filter_by(seq=msg_data['seq']).first()
                             if not existing_msg:
                                 chat_msg = ChatMessage(
-                                    seq=msg_data['seq'],
-                                    time=msg_data['time'],
-                                    talker=msg_data['talker'],
-                                    talker_name=msg_data['talker_name'],
-                                    sender=msg_data['sender'],
-                                    sender_name=msg_data['sender_name'],
-                                    is_self=msg_data['is_self'],
-                                    type=msg_data['type'],
-                                    sub_type=msg_data['sub_type'],
-                                    content=msg_data['content'],
+                                    message_id=msg_data.get('seq'),
+                                    seq=msg_data.get('seq'),
+                                    time=msg_data.get('time'),
+                                    talker=msg_data.get('talker'),
+                                    talker_name=msg_data.get('talker_name'),
+                                    sender=msg_data.get('sender'),
+                                    sender_name=msg_data.get('sender_name'),
+                                    is_self=msg_data.get('is_self'),
+                                    type=msg_data.get('type'),
+                                    sub_type=msg_data.get('sub_type'),
+                                    content=msg_data.get('content'),
                                     employee_id=msg_data.get('employee_id')
                                 )
                                 db.session.add(chat_msg)
