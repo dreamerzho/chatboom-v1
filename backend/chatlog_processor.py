@@ -4,6 +4,7 @@
 聊天记录处理器
 负责解析聊天记录中的文件信息、去重、人员关联等功能
 整合了旧chat_parser.py中的核心功能
+基于 seq 字段进行高效去重
 """
 
 import re
@@ -134,6 +135,7 @@ class ChatLogProcessor:
     """
     聊天记录处理器 - 重构版
     负责对整个聊天记录列表进行处理，包括去重、关联等
+    基于 chatlog 的 seq 字段进行高效去重
     """
     
     def __init__(self, project_id: int, date_str: Optional[str] = None, yield_log: Optional[Callable[[str], None]] = None):
@@ -175,6 +177,7 @@ class ChatLogProcessor:
     def process_chatlogs(self) -> Dict[str, Any]:
         """
         处理并同步项目的聊天记录（只通过chatlogAPI获取）
+        基于 seq 字段进行高效去重，使用数据库级别的 UPSERT 操作
         步骤：
         1. 读取项目的所有群昵称（chatroom_name），遍历每个群聊。
         2. 对每个群聊，调用chatlogAPI拉取消息（get_chatlog_by_talker_and_time），按时间段。
@@ -207,10 +210,12 @@ class ChatLogProcessor:
             total_files = 0
             all_new_msgs = []
             all_new_files = []
+            
             for chatroom in chatrooms:
                 group_name = chatroom.chatroom_name
                 group_type = chatroom.chatroom_type
                 self._log(f"同步群聊：{group_name}（类型：{group_type}）...")
+                
                 # 拉取该群的所有消息
                 from datetime import datetime, timedelta
                 end_date = datetime.now().strftime('%Y-%m-%d')
@@ -221,16 +226,18 @@ class ChatLogProcessor:
                     end_date=end_date
                 )
                 self._log(f"获取到 {len(msgs)} 条消息，开始解析...")
+                
                 group_info = {'name': group_name, 'type': group_type}
                 result = self.process_and_deduplicate(msgs, group_info)
-                # 批量入库消息（使用 upsert 防止重复报错）
+                
+                # 批量入库消息（使用 UPSERT 防止重复报错）
                 chat_messages = result['chat_messages']
                 if chat_messages:
                     try:
-                        # 构建插入语句，ON CONFLICT DO NOTHING
+                        # 构建插入语句，使用 ON CONFLICT DO NOTHING 进行去重
                         insert_stmt = insert(ChatMessage).values([
                             {
-                                'message_id': msg.get('message_id'),
+                                'message_id': msg.get('message_id'),  # 存储 seq 值
                                 'project_id': self.project_id,
                                 'talker_name': group_name,
                                 'sender_name': msg['sender_nickname'],
@@ -241,61 +248,68 @@ class ChatLogProcessor:
                             }
                             for msg in chat_messages
                         ])
-                        do_nothing_stmt = insert_stmt.on_conflict_do_nothing(index_elements=['message_id'])
-                        db.session.execute(do_nothing_stmt)
+                        
+                        # 使用复合唯一约束进行去重
+                        do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
+                            index_elements=['project_id', 'message_id']
+                        )
+                        result = db.session.execute(do_nothing_stmt)
                         db.session.commit()
-                        total_messages += len(chat_messages)
+                        
+                        # 统计实际插入的记录数
+                        inserted_count = result.rowcount if hasattr(result, 'rowcount') else len(chat_messages)
+                        total_messages += inserted_count
                         all_new_msgs.extend(chat_messages)
-                        self._log(f"群聊 {group_name} 批量入库消息 {len(chat_messages)} 条（已自动跳过重复消息）。")
+                        self._log(f"群聊 {group_name} 批量入库消息 {inserted_count} 条（已自动跳过重复消息）。")
+                        
                     except Exception as e:
                         db.session.rollback()
                         self._log(f"消息批量入库失败: {e}")
-                # 批量入库文件（严格去重：同一 project_id + message_seq + original_name 只插入一次）
+                
+                # 批量入库文件（使用 UPSERT 进行去重）
                 file_records = result['file_records']
                 if file_records:
-                    # 先查找数据库中已存在的文件（用 project_id, message_seq, original_name 去重）
-                    file_keys = [
-                        (self.project_id, file.get('group_name'), file.get('filename'))
-                        for file in file_records
-                    ]
-                    # 查询已存在的文件
-                    existing_files = db.session.query(FileRecord.project_id, FileRecord.chatroom_name, FileRecord.original_name).filter(
-                        or_(
-                            *[and_(FileRecord.project_id == pid, FileRecord.chatroom_name == gname, FileRecord.original_name == fname) for pid, gname, fname in file_keys]
+                    try:
+                        # 构建文件插入语句
+                        file_insert_stmt = insert(FileRecord).values([
+                            {
+                                'project_id': self.project_id,
+                                'project_name': project.project_name,
+                                'chatroom_name': file.get('group_name'),
+                                'original_name': file.get('filename'),
+                                'standardized_name': file.get('filename'),
+                                'author_abbreviation': file.get('parsed_author_abbreviation') or '',
+                                'version': file.get('parsed_version') or '',
+                                'file_extension': file.get('file_type') or '',
+                                'upload_time': file.get('upload_time'),
+                                'uploader': str(file.get('uploader_id')) if file.get('uploader_id') else '',
+                                'status': 'pending',
+                                'message_seq': file.get('message_seq') if file.get('message_seq') else None,
+                                'created_at': datetime.utcnow(),
+                                'updated_at': datetime.utcnow()
+                            }
+                            for file in file_records
+                        ])
+                        
+                        # 使用复合唯一约束进行去重
+                        file_do_nothing_stmt = file_insert_stmt.on_conflict_do_nothing(
+                            index_elements=['message_seq', 'original_name']
                         )
-                    ).all()
-                    existing_set = set(existing_files)
-                    # 只保留未存在的文件
-                    new_file_records = [file for file in file_records if (self.project_id, file.get('group_name'), file.get('filename')) not in existing_set]
-                    if new_file_records:
-                        for file in new_file_records:
-                            try:
-                                filerec = FileRecord(
-                                    project_id=self.project_id,
-                                    project_name=project.project_name,
-                                    chatroom_name=file.get('group_name'),
-                                    original_name=file.get('filename'),
-                                    standardized_name=file.get('filename'),
-                                    author_abbreviation=file.get('parsed_author_abbreviation') or '',
-                                    version=file.get('parsed_version') or '',
-                                    file_extension=file.get('file_type') or '',
-                                    upload_time=file.get('upload_time'),
-                                    uploader=str(file.get('uploader_id')) if file.get('uploader_id') else '',
-                                    status='pending',
-                                    message_seq=file.get('message_seq') if file.get('message_seq') else None
-                                )
-                                db.session.add(filerec)
-                                total_files += 1
-                                all_new_files.append(filerec)
-                            except Exception as e:
-                                self._log(f"文件入库失败: {e}")
-                                continue
+                        file_result = db.session.execute(file_do_nothing_stmt)
                         db.session.commit()
-                        self._log(f"群聊 {group_name} 批量入库文件 {len(new_file_records)} 条（已自动跳过重复文件）。")
-                    else:
-                        self._log(f"群聊 {group_name} 本次无新文件需要入库，全部为已存在文件。")
-                db.session.commit()
-                self._log(f"群聊 {group_name} 入库消息 {len(result['chat_messages'])} 条，文件 {len(result['file_records'])} 条。")
+                        
+                        # 统计实际插入的文件数
+                        inserted_file_count = file_result.rowcount if hasattr(file_result, 'rowcount') else len(file_records)
+                        total_files += inserted_file_count
+                        all_new_files.extend(file_records)
+                        self._log(f"群聊 {group_name} 批量入库文件 {inserted_file_count} 条（已自动跳过重复文件）。")
+                        
+                    except Exception as e:
+                        db.session.rollback()
+                        self._log(f"文件批量入库失败: {e}")
+                
+                self._log(f"群聊 {group_name} 处理完成。")
+            
             self._log(f"全部群聊同步完成。共入库消息 {total_messages} 条，文件 {total_files} 条。")
             return {
                 'success': True,
@@ -304,6 +318,7 @@ class ChatLogProcessor:
                 'total_files': total_files,
                 'logs': []
             }
+            
         except Exception as e:
             self._log(f"同步过程发生异常: {e}\n{traceback.format_exc()}")
             db.session.rollback()
@@ -493,26 +508,19 @@ class ChatLogProcessor:
                        group_info: Dict[str, Any]) -> Dict[str, Any]:
         """
         处理聊天记录，包括解析、关联、去重
+        基于 seq 字段进行高效去重，减少数据库查询
         """
         new_messages = []
         new_files = []
         
-        # 首先检查数据库中已存在的seq
-        seqs_in_log = [msg.get('seq') for msg in chatlog if msg.get('seq')]
-        if seqs_in_log:
-            seqs_in_log_str = [str(seq) for seq in seqs_in_log]
-            existing_seqs = db.session.query(ChatMessage.message_id).filter(
-                ChatMessage.project_id == self.project_id,
-                ChatMessage.message_id.in_(seqs_in_log_str)
-            ).all()
-            processed_seqs = {seq[0] for seq in existing_seqs}
-            self._log(f"在数据库中找到 {len(processed_seqs)} 条已存在的记录，将跳过处理。")
-        else:
-            processed_seqs = set()
-
+        # 优化：减少数据库查询，直接处理所有消息
+        # 数据库级别的唯一约束会自动处理重复
+        self._log(f"开始处理 {len(chatlog)} 条消息...")
+        
         for message in chatlog:
             seq = message.get('seq')
-            if not seq or seq in processed_seqs:
+            if not seq:
+                self._log(f"跳过无 seq 字段的消息: {message.get('senderName', 'unknown')}")
                 continue
 
             parsed_message = self.parser.parse_message(message)
@@ -529,9 +537,8 @@ class ChatLogProcessor:
                 file_record = self._create_file_record(parsed_message, employee_id, role, group_info)
                 if file_record:
                     new_files.append(file_record)
-            
-            processed_seqs.add(seq)
 
+        self._log(f"处理完成：消息 {len(new_messages)} 条，文件 {len(new_files)} 条")
         return {
             "chat_messages": new_messages,
             "file_records": new_files

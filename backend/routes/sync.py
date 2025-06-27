@@ -380,12 +380,8 @@ def get_chatrooms():
         logger.error(f"获取群聊列表失败: {str(e)}\n{traceback.format_exc()}")
         return jsonify({
             'success': False,
-            'error': str(e),
-            'mock_data': [
-                {'name': '测试群聊A', 'message_count': 10, 'last_message_time': None},
-                {'name': '测试群聊B', 'message_count': 5, 'last_message_time': None}
-            ]
-        }), 200  # 返回200，避免CORS问题
+            'error': str(e)
+        }), 500  # 返回500，避免CORS问题
 
 @sync_bp.route('/project/<int:project_id>/stream', methods=['POST'])
 def sync_project_data_stream(project_id: int):

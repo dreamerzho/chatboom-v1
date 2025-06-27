@@ -3,12 +3,14 @@
 
 from datetime import datetime
 from db import db
+from sqlalchemy import UniqueConstraint
 
 class FileRecord(db.Model):
     """
     文件记录模型
     用于管理聊天记录中的文件信息
     支持文件命名规范验证、版本控制和分类管理
+    基于 message_seq 和 original_name 进行去重
     """
     __tablename__ = 'file_records'
     
@@ -41,6 +43,11 @@ class FileRecord(db.Model):
     employee_id = db.Column(db.Integer, db.ForeignKey('employee_mappings.id'))  # 关联员工
     chatroom_name = db.Column(db.String(128))  # 来源群聊名称
     message_seq = db.Column(db.String(64))  # 关联的消息序列号
+    
+    # 复合唯一约束：确保同一消息中的同一文件不会重复记录
+    __table_args__ = (
+        UniqueConstraint('message_seq', 'original_name', name='uq_message_file'),
+    )
     
     def to_dict(self):
         """转换为字典格式，用于API响应"""

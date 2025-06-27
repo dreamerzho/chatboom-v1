@@ -3,17 +3,19 @@
 
 from datetime import datetime
 from db import db
+from sqlalchemy import UniqueConstraint
 
 class ChatMessage(db.Model):
     """
     聊天消息模型
     用于存储微信群聊中的消息记录
     支持多种消息类型（文本、图片、文件等）
+    基于 chatlog 的 seq 字段进行高效去重
     """
     __tablename__ = 'chat_messages'
     
     id = db.Column(db.Integer, primary_key=True)
-    message_id = db.Column(db.String(128), unique=True)  # 消息唯一标识
+    message_id = db.Column(db.String(128), nullable=False)  # 存储 chatlog 的 seq 值作为唯一标识
     talker_name = db.Column(db.String(128), nullable=False)  # 群聊名称
     sender_name = db.Column(db.String(128), nullable=False)  # 发送者昵称
     message_type = db.Column(db.String(32), nullable=False)  # 消息类型（如：文本、图片、文件、图片消息、视频等，支持字符串）
@@ -25,6 +27,11 @@ class ChatMessage(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'))  # 关联的项目ID
     message_subtype = db.Column(db.Integer)  # 消息子类型
     type = db.Column(db.Integer)  # 消息类型（别名，用于兼容）
+    
+    # 复合唯一约束：确保同一项目下同一消息ID不会重复
+    __table_args__ = (
+        UniqueConstraint('project_id', 'message_id', name='uq_project_message'),
+    )
     
     def to_dict(self):
         """转换为字典格式，用于API响应"""

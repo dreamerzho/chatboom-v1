@@ -20,57 +20,32 @@ logger = logging.getLogger(__name__)
 def import_chatlog():
     """
     导入聊天记录
-    请求体: JSON格式，包含导入参数
-    返回: 导入结果
+    支持多种格式的聊天记录导入
+    基于 seq 字段进行高效去重
     """
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'success': False, 'error': '缺少请求数据'}), 400
+        if 'file' not in request.files:
+            return jsonify({'error': '没有上传文件'}), 400
         
-        # 验证必填字段
-        required_fields = ['chatroom_name', 'start_date', 'end_date']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'success': False, 'error': f'缺少必填字段: {field}'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': '没有选择文件'}), 400
         
-        # 调用chatlog工具API - 使用正确的API格式
-        chatroom_name = data['chatroom_name']
-        start_date = data['start_date']
-        end_date = data['end_date']
+        # 获取项目ID和群聊名称
+        project_id = request.form.get('project_id', type=int)
+        chatroom_name = request.form.get('chatroom_name', '')
         
-        # 构建API URL
-        api_url = f"{CHATLOG_BASE_URL}/api/v1/chatlog"
-        params = {
-            'talker': chatroom_name,
-            'time': f"{start_date},{end_date}"
-        }
+        if not project_id:
+            return jsonify({'error': '缺少项目ID'}), 400
         
-        response = requests.get(
-            api_url,
-            params=params,
-            timeout=30
-        )
+        # 读取文件内容
+        content = file.read().decode('utf-8', errors='ignore')
+        lines = content.split('\n')
         
-        if response.status_code != 200:
-            return jsonify({
-                'success': False,
-                'error': f'Chatlog工具API调用失败: {response.text}'
-            }), 500
-        
-        # 解析聊天记录数据 - chatlog服务返回的是纯文本格式
-        chatlog_text = response.text
-        if not chatlog_text or chatlog_text.startswith('"time range not found'):
-            return jsonify({
-                'success': False,
-                'error': f'指定时间范围内没有找到聊天记录: {chatlog_text}'
-            }), 404
-        
-        # 解析聊天记录文本格式
         messages_data = []
-        lines = chatlog_text.strip().split('\n')
-        
         i = 0
+        
+        # 解析聊天记录格式
         while i < len(lines):
             line = lines[i].strip()
             if line and not line.startswith('"'):
@@ -98,6 +73,10 @@ def import_chatlog():
                             # 构建完整的日期时间
                             full_time = f"2025-06-17 {time_str}:00"
                             
+                            # 生成基于时间的唯一 seq
+                            import time
+                            seq = str(int(time.time() * 1000))  # 毫秒级时间戳
+                            
                             msg_data = {
                                 'time': full_time,
                                 'talkerName': chatroom_name,
@@ -105,7 +84,8 @@ def import_chatlog():
                                 'senderId': sender_id,
                                 'type': 1,  # 默认为文本消息
                                 'content': content,
-                                'id': f"{full_time}_{sender_id}_{hash(line)}"  # 生成唯一ID
+                                'seq': seq,  # 使用 seq 作为唯一标识
+                                'id': seq  # 兼容性字段
                             }
                             messages_data.append(msg_data)
                 except Exception as e:
@@ -115,63 +95,54 @@ def import_chatlog():
         imported_count = 0
         skipped_count = 0
         
-        for msg_data in messages_data:
+        # 使用批量 UPSERT 操作进行高效去重
+        if messages_data:
             try:
-                # 检查消息是否已存在
-                existing_msg = ChatMessage.query.filter_by(
-                    message_id=msg_data.get('id'),
-                    talker_name=msg_data.get('talkerName'),
-                    sender_name=msg_data.get('senderName')
-                ).first()
+                from sqlalchemy.dialects.postgresql import insert
                 
-                if existing_msg:
-                    skipped_count += 1
-                    continue
+                # 构建批量插入语句
+                insert_stmt = insert(ChatMessage).values([
+                    {
+                        'message_id': msg.get('seq'),  # 使用 seq 作为 message_id
+                        'project_id': project_id,
+                        'talker_name': msg.get('talkerName'),
+                        'sender_name': msg.get('senderName'),
+                        'timestamp': datetime.fromisoformat(msg.get('time').replace('Z', '+00:00')),
+                        'message_type': msg.get('type'),
+                        'content': msg.get('content'),
+                        'created_at': datetime.utcnow()
+                    }
+                    for msg in messages_data
+                ])
                 
-                # 解析时间戳
-                try:
-                    timestamp = datetime.fromisoformat(msg_data.get('time').replace('Z', '+00:00'))
-                except:
-                    timestamp = datetime.utcnow()
-                
-                # 创建新的聊天消息记录
-                new_message = ChatMessage(
-                    message_id=msg_data.get('id') or msg_data.get('seq'),  # 修复：确保唯一标识赋值
-                    talker_name=msg_data.get('talkerName'),
-                    sender_name=msg_data.get('senderName'),
-                    timestamp=timestamp,
-                    message_type=msg_data.get('type'),
-                    content=msg_data.get('content'),
-                    created_at=datetime.utcnow()
+                # 使用复合唯一约束进行去重
+                do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
+                    index_elements=['project_id', 'message_id']
                 )
+                result = db.session.execute(do_nothing_stmt)
+                db.session.commit()
                 
-                db.session.add(new_message)
-                imported_count += 1
+                # 统计实际插入的记录数
+                imported_count = result.rowcount if hasattr(result, 'rowcount') else len(messages_data)
+                skipped_count = len(messages_data) - imported_count
+                
+                logger.info(f"批量导入完成：成功 {imported_count} 条，跳过重复 {skipped_count} 条")
                 
             except Exception as e:
-                logger.error(f"处理消息数据失败: {str(e)}, 数据: {msg_data}")
-                skipped_count += 1
-                continue
-        
-        db.session.commit()
+                db.session.rollback()
+                logger.error(f"批量导入失败: {str(e)}")
+                return jsonify({'error': f'导入失败: {str(e)}'}), 500
         
         return jsonify({
             'success': True,
-            'data': {
-                'imported_count': imported_count,
-                'skipped_count': skipped_count,
-                'total_processed': len(messages_data),
-                'chatroom_name': data['chatroom_name'],
-                'period': {
-                    'start_date': data['start_date'],
-                    'end_date': data['end_date']
-                }
-            },
-            'message': f'成功导入 {imported_count} 条聊天记录'
+            'message': f'导入完成，成功导入 {imported_count} 条消息，跳过重复 {skipped_count} 条',
+            'imported_count': imported_count,
+            'skipped_count': skipped_count
         })
+        
     except Exception as e:
-        logger.error(f"导入聊天记录失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"导入聊天记录时发生错误: {str(e)}")
+        return jsonify({'error': f'导入失败: {str(e)}'}), 500
 
 @chatlog_bp.route('/messages', methods=['GET'])
 def get_chat_messages():

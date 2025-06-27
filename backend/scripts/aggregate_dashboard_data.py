@@ -23,16 +23,18 @@ def aggregate_project_health(period_days=7):
             WorkloadRecord.project_id == p.id,
             WorkloadRecord.date >= since.date()
         ).all()
-        # 统计健康分、定稿周期、平均迭代等（此处为 mock 逻辑，可按需完善）
+        # 统计健康分、定稿周期、平均迭代等（移除mock逻辑，改为合理默认值或真实统计）
         health_score = 100 - len([w for w in workloads if w.is_iteration]) * 2  # 迭代多则健康分低
-        avg_time_to_final = 48.0  # mock
+        # avg_time_to_final 应根据实际数据统计，这里设为0或None
+        avg_time_to_final = None
         avg_revisions = sum([w.iteration_count for w in workloads]) / len(workloads) if workloads else 0
         risk_count = RiskEvent.query.filter(
             RiskEvent.project_id == p.id,
             RiskEvent.event_time >= since
         ).count()
-        warning_count = risk_count  # mock
-        negative_sentiment_rate = 0.05  # mock
+        # warning_count、negative_sentiment_rate 也设为None或根据实际统计
+        warning_count = None
+        negative_sentiment_rate = None
         # 写入 project_health_stats
         stat = ProjectHealthStats(
             project_id=p.id,
