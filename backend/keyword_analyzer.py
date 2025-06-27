@@ -19,7 +19,7 @@ from models.keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKey
 from models.chat import ChatMessage
 from models.employee import EmployeeMapping
 from models.project import Project
-from db import db
+from backend.db import db
 
 logger = logging.getLogger(__name__)
 

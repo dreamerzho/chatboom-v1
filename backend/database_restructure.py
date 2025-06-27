@@ -4,18 +4,13 @@
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from flask import Flask
+from backend.app import app
+from backend.db import db
 from sqlalchemy import text, inspect
 from config import SQLALCHEMY_DATABASE_URI
-from app import db, EmployeeMapping, Project, FileRecord, ChatMessage
-
-# 创建Flask应用
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = SQLALCHEMY_DATABASE_URI
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db.init_app(app)
+from app import EmployeeMapping, Project, FileRecord, ChatMessage
 
 def backup_existing_data():
     """备份现有数据"""

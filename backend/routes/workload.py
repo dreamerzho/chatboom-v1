@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 from sqlalchemy import func, and_, or_, desc
 from sqlalchemy.orm import joinedload
 
-from db import db
+from backend.db import db
 from models.workload import WorkloadRecord, EmployeeLoadBaseline, WorkloadWeights
 from models.employee import EmployeeMapping
 from models.project import Project

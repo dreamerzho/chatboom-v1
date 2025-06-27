@@ -21,7 +21,7 @@ class FileNameValidator:
         # 文件名规范的正则表达式
         # 格式：[YYMMDD]-[项目名]-[工单名/内容描述]-[工作量]-[作者缩写]-[版本号].扩展名
         self.pattern = re.compile(
-            r'^(\d{6})-([^-]+)-([^-]+)-([^-]+)-([^-]+)-([^-]+)\.([^.]+)$'
+            r'^(\d{6})-([^-]+)-([^-]+)-([^-]+)-([A-Za-z]{2,})-([Vv]\d+)\.([^.]+)$'
         )
         
         # 支持的文件扩展名
@@ -65,34 +65,27 @@ class FileNameValidator:
             # 提取各个字段
             date_code, project_name, work_order, workload, author, version, extension = match.groups()
             
-            # 验证各个字段
-            validation_result = self._validate_fields(
-                date_code, project_name, work_order, workload, author, version, extension
-            )
+            # 放宽合规判定：只要能解析出日期、项目、工单、作者、版本即可
+            required_fields = [date_code, project_name, work_order, author, version]
+            is_valid = all(required_fields)
             
-            if validation_result['is_valid']:
-                return {
-                    'is_compliant': True,
-                    'filename': clean_filename,
-                    'parsed_info': {
-                        'date_code': date_code,
-                        'project_name': project_name,
-                        'work_order': work_order,
-                        'workload': workload,
-                        'author_abbreviation': author,
-                        'version': version,
-                        'extension': extension,
-                        'date': self._parse_date_code(date_code),
-                        'formatted_date': self._format_date(date_code)
-                    }
-                }
-            else:
-                return {
-                    'is_compliant': False,
-                    'filename': clean_filename,
-                    'error': validation_result['error'],
-                    'suggestion': validation_result['suggestion']
-                }
+            return {
+                'is_compliant': is_valid,
+                'filename': clean_filename,
+                'parsed_info': {
+                    'date_code': date_code,
+                    'project_name': project_name,
+                    'work_order': work_order,
+                    'workload': workload,
+                    'author_abbreviation': author,
+                    'version': version,
+                    'extension': extension,
+                    'date': self._parse_date_code(date_code),
+                    'formatted_date': self._format_date(date_code)
+                } if is_valid else {},
+                'error': None if is_valid else '部分字段缺失',
+                'suggestion': None if is_valid else self._generate_suggestion(clean_filename)
+            }
                 
         except Exception as e:
             logger.error(f"验证文件名失败: {filename}, 错误: {str(e)}")
@@ -202,9 +195,8 @@ class FileNameValidator:
             workload: 工作量字符串
         返回: 是否为有效格式
         """
-        # 支持: 数字+单位（P/p/份/稿/张，大小写均可），或纯数字
-        pattern = r'^(\d+)(([pP]|[fF][eE][nN]|[gG][aA][oO]|[zZ][hH][aA][nN][gG]|[份稿张]))?$'
-        return bool(re.match(pattern, workload))
+        # 只要有数字即可
+        return bool(re.search(r'\d+', workload))
     
     def _is_valid_author_abbreviation(self, author: str) -> bool:
         """
@@ -213,9 +205,8 @@ class FileNameValidator:
             author: 作者缩写
         返回: 是否为有效格式
         """
-        # 2-3个英文字母
-        pattern = r'^[A-Za-z]{2,3}$'
-        return bool(re.match(pattern, author))
+        # 2-3个英文字母，兼容大小写
+        return bool(re.match(r'^[A-Za-z]{2,3}$', author))
     
     def _is_valid_version(self, version: str) -> bool:
         """
@@ -224,9 +215,8 @@ class FileNameValidator:
             version: 版本号
         返回: 是否为有效格式
         """
-        # 支持: v1, V1, v1.0, V1.0, v2, V2, v2.1, V3 等
-        pattern = r'^[vV]\d+(\.\d+)?$'
-        return bool(re.match(pattern, version))
+        # v1, V1, v1.0, V1.0, v2, V2, v2.1, V3 等，兼容大小写
+        return bool(re.match(r'^[vV]\d+(\.\d+)?$', version))
     
     def _parse_date_code(self, date_code: str) -> Optional[datetime]:
         """

@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request, current_app
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_
 import logging
-from db import db
+from backend.db import db
 
 # 导入统一数据管理器
 from data_manager import data_manager, DataManager

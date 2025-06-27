@@ -2,8 +2,12 @@
 # 自动聚合仪表盘核心数据，定期统计项目健康、风险事件等
 # 支持手动和定时任务调用，便于前端仪表盘实时刷新
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from datetime import datetime, timedelta
-from db import db
+from backend.db import db
 from models.project import Project
 from models.workload import WorkloadRecord
 from models.project_health import ProjectHealthStats

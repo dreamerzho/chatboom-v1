@@ -2,10 +2,7 @@
 # 包含文件记录、文件命名规范验证等模型定义
 
 from datetime import datetime
-try:
-    from db import db
-except ImportError:
-    from backend.db import db
+from backend.db import db
 from sqlalchemy import UniqueConstraint
 
 class FileRecord(db.Model):

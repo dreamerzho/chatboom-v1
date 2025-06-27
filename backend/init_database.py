@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask
 from config import Config
-from db import db
+from backend.db import db
 
 # 导入所有模型以确保它们被注册
 from models.employee import EmployeeMapping

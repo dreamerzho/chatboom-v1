@@ -12,7 +12,7 @@ from models.chat import ChatMessage
 from models.employee import EmployeeMapping
 from models.project import Project
 from keyword_analyzer import KeywordAnalyzer
-from db import db
+from backend.db import db
 
 # 创建蓝图
 keywords_bp = Blueprint('keywords', __name__, url_prefix='/api/v1/keywords')

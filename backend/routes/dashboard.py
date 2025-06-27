@@ -5,11 +5,11 @@ from flask import Blueprint, jsonify, request, current_app
 from datetime import datetime, timedelta, date
 from sqlalchemy import func, and_, desc
 import logging
-from db import db
+from backend.db import db
 from models.workload import WorkloadRecord
 from models.project_health import ProjectHealthStats
 from models.risk_event import RiskEvent
-from models import ChatMessage, FileRecord, Project, EmployeeMapping, ProjectChatroom
+from models import ChatMessage, FileRecord, Project, EmployeeMapping, ProjectChatroom, AnalysisConfig
 from analysis_service import AnalysisService
 from models.asset import Asset, AssetAnalysis
 
@@ -859,4 +859,42 @@ def get_dashboard_overview():
         return jsonify({
             'success': False,
             'error': str(e)
-        }), 500 
+        }), 500
+
+# ====== 算法参数配置API ======
+@dashboard_bp.route('/analysis/config', methods=['GET'])
+def get_analysis_config():
+    """获取所有算法参数"""
+    configs = AnalysisConfig.query.all()
+    return jsonify({
+        'success': True,
+        'data': [c.to_dict() for c in configs]
+    })
+
+@dashboard_bp.route('/analysis/config', methods=['POST'])
+def set_analysis_config():
+    """批量设置算法参数（参数为[{key, value, description}]）"""
+    data = request.get_json(force=True)
+    if not isinstance(data, list):
+        return jsonify({'success': False, 'error': '参数格式错误，需为列表'}), 400
+    for item in data:
+        key = item.get('key')
+        value = item.get('value')
+        description = item.get('description')
+        if not key:
+            continue
+        config = AnalysisConfig.query.filter_by(key=key).first()
+        if config:
+            config.value = value
+            if description:
+                config.description = description
+        else:
+            config = AnalysisConfig(key=key, value=value, description=description)
+            db.session.add(config)
+    db.session.commit()
+    return jsonify({'success': True})
+
+@dashboard_bp.route('/', methods=['GET'])
+def dashboard_root():
+    """兼容前端：dashboard根路由重定向到overview"""
+    return get_dashboard_overview() 

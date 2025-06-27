@@ -3,10 +3,7 @@
 # 支持V2精准评估模型的项目健康度分析和智能风险预警
 
 from datetime import datetime
-try:
-    from db import db
-except ImportError:
-    from backend.db import db
+from backend.db import db
 
 class ProjectHealthStats(db.Model):
     """

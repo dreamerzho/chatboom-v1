@@ -3,10 +3,7 @@
 # 支持风险流、预警推送、项目/员工风险榜单等业务
 
 from datetime import datetime
-try:
-    from db import db
-except ImportError:
-    from backend.db import db
+from backend.db import db
 
 class RiskEvent(db.Model):
     """

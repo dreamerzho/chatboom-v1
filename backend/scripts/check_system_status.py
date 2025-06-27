@@ -8,23 +8,16 @@ import requests
 import json
 from datetime import datetime
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from flask import Flask
-from sqlalchemy import func
-from config import Config
-from db import db
+from backend.app import app
+from backend.db import db
 
 # 导入模型
 from models.employee import EmployeeMapping
 from models.project import Project
 from models.file import FileRecord
 from models.chat import ChatMessage
-
-# 创建Flask应用
-app = Flask(__name__)
-app.config.from_object(Config)
-db.init_app(app)
 
 def check_database_status():
     """检查数据库状态"""

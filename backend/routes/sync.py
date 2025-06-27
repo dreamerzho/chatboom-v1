@@ -17,7 +17,7 @@ from models.chat import ChatMessage
 from models.file import FileRecord
 from models.employee import EmployeeMapping
 from chatlog_integration import chatlog_client
-from db import db
+from backend.db import db
 from data_manager import data_manager
 from chatlog_processor import ChatLogProcessor
 

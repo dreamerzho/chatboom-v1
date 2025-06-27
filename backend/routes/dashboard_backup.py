@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request, current_app
 from datetime import datetime, timedelta, date
 from sqlalchemy import func, and_, desc
 import logging
-from db import db
+from backend.db import db
 from models.workload import WorkloadRecord
 from models.project_health import ProjectHealthStats
 from models.risk_event import RiskEvent

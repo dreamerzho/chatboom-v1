@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 import logging
 # from config import SQLALCHEMY_DATABASE_URI # 移除直接导入，通过 app.config 访问
-from db import db
+from backend.db import db
 from config import Config
 
 # 配置日志

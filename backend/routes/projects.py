@@ -5,12 +5,13 @@ from flask import Blueprint, request, jsonify, current_app
 from datetime import datetime, timedelta
 import logging
 from sqlalchemy import func, and_
-from db import db
+from backend.db import db
 from models import Project, ProjectChatroom, ChatMessage, FileRecord, EmployeeMapping
 from models.workload import WorkloadRecord
 from models.project_health import ProjectHealthStats
 from models.risk_event import RiskEvent
 from itertools import groupby
+from analysis_service import AnalysisService
 
 # 创建蓝图
 projects_bp = Blueprint('projects', __name__, url_prefix='/api/v1/projects')
@@ -194,7 +195,7 @@ def get_project(project_id):
         # 健康分
         health_stat = ProjectHealthStats.query.filter_by(project_id=project.id).order_by(ProjectHealthStats.created_at.desc()).first()
         health_score = health_stat.health_score if health_stat else None
-        risk_level = health_stat.risk_level if health_stat else None
+        risk_level = get_risk_level(health_score)
         # 风险事件
         recent_risks = RiskEvent.query.filter_by(project_id=project.id).order_by(RiskEvent.event_time.desc()).limit(5).all()
         risks = [r.to_dict() for r in recent_risks]
@@ -261,6 +262,24 @@ def get_project(project_id):
             'keywords': keywords,  # 关键词分析
             'recent_activities': recent_activities  # 近期动态
         }
+        # 统计数据
+        service = AnalysisService()
+        health = service.calculate_project_health_score(project_id)
+        # 获取项目所有资产的WE分布
+        def get_we_data(project_id):
+            from models.asset import Asset
+            assets = Asset.query.filter_by(project_id=project_id).all()
+            return [{'id': a.id, 'we': a.workload_equivalent or 0, 'author': a.author_id, 'date': a.submission_date.isoformat() if a.submission_date else ''} for a in assets]
+        we_data = get_we_data(project_id)
+        # 在返回的data中补充：
+        project_data['health'] = health
+        project_data['weData'] = we_data
+        if health:
+            project_data['health_score'] = health.get('health_score')
+            project_data['total_we'] = health.get('total_we')
+        else:
+            project_data['health_score'] = None
+            project_data['total_we'] = 0
         return jsonify({
             'success': True,
             'data': project_data
@@ -602,4 +621,33 @@ def get_project_risk_events(project_id):
         'page': page,
         'size': size,
         'data': [e.to_dict() for e in events]
-    }) 
+    })
+
+@projects_bp.route('/<int:project_id>/health', methods=['GET'])
+def get_project_health(project_id):
+    """返回指定项目的健康度统计"""
+    service = AnalysisService()
+    result = service.calculate_project_health_score(project_id)
+    if result:
+        return jsonify({'success': True, 'data': result})
+    else:
+        return jsonify({'success': False, 'error': '项目不存在或无健康度数据'}), 404
+
+@projects_bp.route('/<int:project_id>/files', methods=['GET'])
+def get_project_files(project_id):
+    """返回指定项目的文件列表"""
+    files = FileRecord.query.filter_by(project_id=project_id).all()
+    file_list = [f.to_dict() for f in files]
+    return jsonify({'success': True, 'data': file_list})
+
+def get_risk_level(health_score):
+    if health_score is None:
+        return None
+    if health_score >= 85:
+        return 'low'
+    elif health_score >= 70:
+        return 'medium'
+    elif health_score >= 50:
+        return 'risk'
+    else:
+        return 'critical' 

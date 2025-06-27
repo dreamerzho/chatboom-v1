@@ -3,16 +3,11 @@
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from flask import Flask
+from backend.app import app
 from sqlalchemy import inspect, text
 from config import SQLALCHEMY_DATABASE_URI
-
-# 创建Flask应用
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = SQLALCHEMY_DATABASE_URI
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 def check_table_structure():
     """检查所有表的实际结构"""

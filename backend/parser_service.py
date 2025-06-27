@@ -34,15 +34,17 @@ class ParserService:
     def __init__(self):
         # 主要命名规范：`[YYMMDD]-[项目名]-[工单名/内容描述]-[工作量]-[作者缩写]-[版本号].扩展名`
         self.primary_pattern = re.compile(
-            r'^(?P<date>\d{6})-(?P<project>.+?)-(?P<desc>.+?)(?:-(?P<workload>\d+[pP条]?))?-(?P<author>[A-Z]{2,})-(?P<version>V\d+)\.(?P<ext>.+)$'
+            r'^(?P<date>\d{6})-(?P<project>.+?)-(?P<desc>.+?)(?:-(?P<workload>\d+\w*))?-(?P<author>[A-Za-z]{2,})-(?P<version>[Vv]\d+)\.(?P<ext>.+)$'
         )
         
         # 备用命名规范：处理一些变体
         self.alternative_patterns = [
-            # 没有工作量的版本
-            re.compile(r'^(?P<date>\d{6})-(?P<project>.+?)-(?P<desc>.+?)-(?P<author>[A-Z]{2,})-(?P<version>V\d+)\.(?P<ext>.+)$'),
-            # 没有版本号的版本（默认为V1）
-            re.compile(r'^(?P<date>\d{6})-(?P<project>.+?)-(?P<desc>.+?)(?:-(?P<workload>\d+[pP条]?))?-(?P<author>[A-Z]{2,})\.(?P<ext>.+)$'),
+            re.compile(r'^(?P<date>\d{6})-(?P<project>.+?)-(?P<desc>.+?)-(?P<author>[A-Za-z]{2,})-(?P<version>[Vv]\d+)\.(?P<ext>.+)$'),
+            re.compile(r'^(?P<date>\d{6})-(?P<project>.+?)-(?P<desc>.+?)(?:-(?P<workload>\d+\w*))?-(?P<author>[A-Za-z]{2,})\.(?P<ext>.+)$'),
+            re.compile(r'^(?P<date>\d{6})_(?P<project>.+?)_(?P<desc>.+?)(?:_(?P<workload>\d+\w*))?_(?P<author>[A-Za-z]{2,})_(?P<version>[Vv]\d+)\.(?P<ext>.+)$'),
+            re.compile(r'^(?P<date>\d{6})_(?P<project>.+?)_(?P<desc>.+?)_(?P<author>[A-Za-z]{2,})_(?P<version>[Vv]\d+)\.(?P<ext>.+)$'),
+            re.compile(r'^(?P<date>\d{6})_(?P<project>.+?)_(?P<desc>.+?)(?:_(?P<workload>\d+\w*))?_(?P<author>[A-Za-z]{2,})\.(?P<ext>.+)$'),
+            re.compile(r'^(?P<date>\d{6}) (?P<project>.+?) (?P<desc>.+?)(?: (?P<workload>\d+\w*))? (?P<author>[A-Za-z]{2,}) (?P<version>[Vv]\d+)\.(?P<ext>.+)$'),
         ]
         
         # 工作量转换表
@@ -63,6 +65,9 @@ class ParserService:
             ParsedAssetData: 解析后的数据，如果解析失败返回None
         """
         parse_errors = []
+        
+        # 预处理：去除首尾空格，统一分隔符
+        filename = filename.strip().replace(" ", "-").replace("_", "-")
         
         # 尝试主要命名规范
         match = self.primary_pattern.match(filename)
@@ -105,8 +110,8 @@ class ParserService:
             version = self._parse_version(version_str)
             
             # 构建任务标识符
-            project = groups.get('project', '').strip()
-            desc = groups.get('desc', '').strip()
+            project = self._normalize_text(groups.get('project', '').strip())
+            desc = self._normalize_text(groups.get('desc', '').strip())
             task_identifier = f"{project}-{desc}" if project and desc else desc
             
             # 解析工作量
@@ -114,15 +119,28 @@ class ParserService:
             if workload_amount:
                 workload_amount = self._normalize_workload(workload_amount)
             
+            # 归一化作者缩写
+            author_abbreviation = self._normalize_text(groups.get('author', '').strip()).upper()
+            
+            # 文件类型归类逻辑
+            ext = groups.get('ext', '').lower()
+            filename = match.string.lower()
+            # 如果是压缩包，优先检查文件名中是否有psd/png/jpg等关键词
+            if ext in ['zip', 'rar', '7z']:
+                for t in ['psd', 'png', 'jpg', 'jpeg', 'ai']:
+                    if t in filename:
+                        ext = t
+                        break
+            
             return ParsedAssetData(
                 submission_date=submission_date,
                 task_identifier=task_identifier,
-                author_abbreviation=groups.get('author', '').strip(),
+                author_abbreviation=author_abbreviation,
                 version=version,
                 workload_amount=workload_amount,
                 project_name=project,
                 work_order=desc,
-                file_extension=groups.get('ext', '').lower(),
+                file_extension=ext,
                 is_compliant=True,
                 parse_errors=parse_errors
             )
@@ -186,16 +204,11 @@ class ParserService:
         if not workload_str:
             return None
         
-        # 统一格式
-        workload_str = workload_str.strip().lower()
-        
-        # 处理数字+单位的格式
-        match = re.match(r'(\d+)([pP条])', workload_str)
+        # 只保留数字部分
+        import re
+        match = re.match(r'(\d+)', workload_str)
         if match:
-            number = int(match.group(1))
-            unit = match.group(2)
-            return f"{number}{unit}"
-        
+            return match.group(1)
         return workload_str
     
     def calculate_workload_equivalent(self, workload_amount: str) -> Optional[float]:
@@ -242,10 +255,13 @@ class ParserService:
                 ]
             }
         
+        # 放宽合规判定：只要能解析出日期、项目、工单、作者、版本即可
+        required_fields = [parsed_data.submission_date, parsed_data.project_name, parsed_data.work_order, parsed_data.author_abbreviation, parsed_data.version]
+        is_valid = all(required_fields)
         return {
-            'is_valid': True,
+            'is_valid': is_valid,
             'parsed_data': parsed_data.__dict__,
-            'errors': parsed_data.parse_errors or []
+            'errors': [] if is_valid else ['部分字段缺失']
         }
     
     def generate_task_group_id(self, project_name: str, task_identifier: str, author_abbreviation: str) -> str:
@@ -267,22 +283,20 @@ class ParserService:
     
     def batch_parse(self, filenames: List[str]) -> Dict[str, Any]:
         """
-        批量解析文件名
-        
-        Args:
-            filenames: 文件名列表
-            
-        Returns:
-            Dict: 批量解析结果
+        批量解析文件名，并统计归类分布和异常情况
         """
         results = {
             'total': len(filenames),
             'successful': 0,
             'failed': 0,
             'parsed_data': [],
-            'errors': []
+            'errors': [],
+            'project_distribution': {},
+            'author_distribution': {},
+            'compliant_count': 0,
+            'non_compliant_count': 0,
+            'error_types': {}
         }
-        
         for filename in filenames:
             parsed_data = self.parse(filename)
             if parsed_data:
@@ -291,11 +305,41 @@ class ParserService:
                     'filename': filename,
                     'data': parsed_data.__dict__
                 })
+                # 统计项目分布
+                project = parsed_data.project_name or '未知'
+                results['project_distribution'][project] = results['project_distribution'].get(project, 0) + 1
+                # 统计作者分布
+                author = parsed_data.author_abbreviation or '未知'
+                results['author_distribution'][author] = results['author_distribution'].get(author, 0) + 1
+                # 合规统计
+                if parsed_data.is_compliant:
+                    results['compliant_count'] += 1
+                else:
+                    results['non_compliant_count'] += 1
             else:
                 results['failed'] += 1
+                error_msg = '解析失败'
                 results['errors'].append({
                     'filename': filename,
-                    'error': '解析失败'
+                    'error': error_msg
                 })
-        
-        return results 
+                # 统计错误类型
+                results['error_types'][error_msg] = results['error_types'].get(error_msg, 0) + 1
+        return results
+
+    def _normalize_text(self, text: str) -> str:
+        """
+        归一化文本：去除空格、统一大小写、常见别名映射
+        """
+        if not text:
+            return ''
+        # 去除空格、特殊字符
+        text = text.replace(' ', '').replace('_', '').replace('-', '').lower()
+        # 常见别名映射
+        alias_map = {
+            '金陵中環': '金陵中环',
+            '金陵中环': '金陵中环',
+            'jinlingzhonghuan': '金陵中环',
+            # 可扩展更多别名
+        }
+        return alias_map.get(text, text) 

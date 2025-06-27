@@ -3,10 +3,7 @@
 # 支持文件名解析、版本追溯、工作量计算等高级功能
 
 from datetime import datetime
-try:
-    from db import db
-except ImportError:
-    from backend.db import db
+from backend.db import db
 
 class Asset(db.Model):
     """

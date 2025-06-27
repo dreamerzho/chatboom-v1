@@ -8,11 +8,12 @@ from typing import Dict, List, Optional, Any, Tuple
 from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import joinedload
 
-from db import db
+from backend.db import db
 from models.asset import Asset, AssetAnalysis
 from models.employee import EmployeeMapping
 from models.project import Project
 from parser_service import ParserService
+from models import AnalysisConfig
 
 class AnalysisService:
     """
@@ -228,7 +229,9 @@ class AnalysisService:
                 'efficiency_score': 100.0,
                 'quality_score': 100.0,
                 'risk_factors': [],
-                'recommendations': []
+                'recommendations': [],
+                'weData': [],
+                'total_we': 0.0
             }
         
         # 计算各项指标
@@ -247,6 +250,8 @@ class AnalysisService:
         # 生成改进建议
         recommendations = self._generate_recommendations(risk_factors, health_score)
         
+        weData = [{'id': asset.id, 'we': asset.workload_equivalent or 0, 'author': asset.author_id, 'date': asset.submission_date.isoformat() if asset.submission_date else ''} for asset in assets]
+        
         return {
             'health_score': round(health_score, 1),
             'risk_level': risk_level,
@@ -255,7 +260,8 @@ class AnalysisService:
             'risk_factors': risk_factors,
             'recommendations': recommendations,
             'asset_count': len(assets),
-            'total_we': sum(asset.workload_equivalent or 0 for asset in assets)
+            'total_we': sum(asset.workload_equivalent or 0 for asset in assets),
+            'weData': weData
         }
     
     def _calculate_project_efficiency(self, assets: List[Asset]) -> float:
@@ -517,4 +523,81 @@ class AnalysisService:
         try:
             return float(workload_str)
         except ValueError:
-            return 1.0  # 默认值 
+            return 1.0  # 默认值
+    
+    def calculate_employee_baseline(self, employee_id: int) -> Dict[str, Any]:
+        """
+        计算员工个人能力基线（历史平均迭代次数）
+        Args:
+            employee_id: 员工ID
+        Returns:
+            Dict: {avg_iterations, total_projects, total_assets}
+        """
+        # 获取该员工所有资产
+        assets = Asset.query.filter(Asset.author_id == employee_id).all()
+        if not assets:
+            return {
+                'avg_iterations': 0.0,
+                'total_projects': 0,
+                'total_assets': 0
+            }
+        # 统计参与项目数
+        project_ids = set(asset.project_id for asset in assets if asset.project_id)
+        # 统计平均迭代次数
+        avg_iterations = sum(asset.version for asset in assets) / len(assets)
+        return {
+            'avg_iterations': round(avg_iterations, 2),
+            'total_projects': len(project_ids),
+            'total_assets': len(assets)
+        }
+    
+    def smart_rework_attribution(self, employee_id: int, project_id: int) -> Dict[str, Any]:
+        """
+        智能返工归因：对比员工在当前项目的迭代次数与其个人能力基线，自动标记归因标签
+        Args:
+            employee_id: 员工ID
+            project_id: 项目ID
+        Returns:
+            Dict: {current_avg_iterations, personal_baseline, attribution, detail}
+        """
+        # 1. 计算个人能力基线
+        baseline = self.calculate_employee_baseline(employee_id)
+        personal_avg = baseline['avg_iterations']
+        # 2. 统计该员工在当前项目的平均迭代次数
+        assets = Asset.query.filter(Asset.author_id == employee_id, Asset.project_id == project_id).all()
+        if not assets:
+            return {
+                'current_avg_iterations': 0.0,
+                'personal_baseline': personal_avg,
+                'attribution': '无数据',
+                'detail': '该员工在本项目无产出记录'
+            }
+        current_avg = sum(asset.version for asset in assets) / len(assets)
+        # 3. 归因判断（动态参数）
+        rework_warning_delta = self.get_param('rework_warning_delta', default=1.0, as_type=float)
+        high_baseline_threshold = self.get_param('high_baseline_threshold', default=4.0, as_type=float)
+        if current_avg > personal_avg + rework_warning_delta and personal_avg > 0:
+            attribution = '项目难度预警'
+            detail = f'本项目平均迭代次数({current_avg:.2f})远高于个人基线({personal_avg:.2f})，说明项目难度较高或客户要求高。'
+        elif personal_avg > high_baseline_threshold:
+            attribution = '技能错配'
+            detail = f'员工个人基线({personal_avg:.2f})远高于团队平均，建议关注技能匹配。'
+        else:
+            attribution = '正常'
+            detail = f'本项目迭代次数({current_avg:.2f})与个人基线({personal_avg:.2f})接近，表现正常。'
+        return {
+            'current_avg_iterations': round(current_avg, 2),
+            'personal_baseline': round(personal_avg, 2),
+            'attribution': attribution,
+            'detail': detail
+        }
+    
+    def get_param(self, key, default=None, as_type=float):
+        """从AnalysisConfig表动态读取参数，找不到则用默认值"""
+        config = AnalysisConfig.query.filter_by(key=key).first()
+        if config:
+            try:
+                return as_type(config.value)
+            except Exception:
+                return config.value
+        return default 

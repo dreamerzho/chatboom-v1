@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 # 检查数据库中的数据
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from flask import Flask
 from config import Config
-from db import db
+from backend.db import db
 from models.chat import ChatMessage
 from models.file import FileRecord
 from models.project import Project
@@ -11,6 +15,10 @@ from models.employee import EmployeeMapping
 from file_validator import FileNameValidator
 from sqlalchemy import func
 from collections import defaultdict
+from models.asset import Asset
+from analysis_service import AnalysisService
+import hashlib
+import re
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -123,6 +131,81 @@ def batch_fix_file_records():
     session.commit()
     print("工时统计已写入数据库")
 
+def batch_refresh_asset_workload_equivalent():
+    """
+    批量刷新所有Asset的workload_equivalent字段，确保WE统计链路打通
+    """
+    service = AnalysisService()
+    assets = Asset.query.all()
+    updated = 0
+    for asset in assets:
+        we = service.calculate_workload_equivalent(asset)
+        if asset.workload_equivalent != we:
+            asset.workload_equivalent = we
+            updated += 1
+    db.session.commit()
+    print(f"已刷新{updated}条资产的workload_equivalent字段")
+
+def batch_import_assets_from_files():
+    """
+    一次性将所有历史FileRecord批量归档为Asset
+    """
+    files = FileRecord.query.all()
+    count = 0
+    for f in files:
+        if not f.file_md5:
+            continue  # 跳过无md5的文件
+        exists = Asset.query.filter_by(file_md5=f.file_md5).first()
+        if exists:
+            continue
+        asset = Asset()
+        asset.file_md5 = f.file_md5
+        asset.project_id = f.project_id
+        asset.file_name = f.standardized_name or f.original_name
+        asset.author_id = f.uploader
+        asset.submission_date = f.upload_time
+        asset.status = f.status
+        # original_name必填，兜底
+        asset.original_name = f.original_name or f.standardized_name or asset.file_name
+        # 只记录数字，无数字时赋1
+        wa = f.workload
+        if wa is None:
+            wa_num = 1
+        else:
+            match = re.search(r'\d+', str(wa))
+            wa_num = int(match.group()) if match else 1
+        asset.workload_equivalent = wa_num
+        # 动态兼容version为数字
+        ver = f.version or ''
+        match = re.search(r'\d+', ver)
+        version_num = int(match.group()) if match else 1
+        setattr(f, 'version', version_num)
+        db.session.add(asset)
+        count += 1
+    db.session.commit()
+    print(f"已批量归档{count}条FileRecord为Asset")
+
+def batch_fill_file_md5():
+    """
+    批量补全FileRecord表file_md5字段，使用original_name+project_id生成md5
+    """
+    files = FileRecord.query.all()
+    count = 0
+    for f in files:
+        if not f.file_md5:
+            base = (f.original_name or '') + str(f.project_id or '')
+            md5 = hashlib.md5(base.encode('utf-8')).hexdigest()
+            f.file_md5 = md5
+            count += 1
+    db.session.commit()
+    print(f"已补全{count}条FileRecord的file_md5字段")
+
 if __name__ == '__main__':
     with app.app_context():
-        batch_fix_file_records() 
+        batch_fix_file_records()
+        if 'batch_refresh_asset_workload_equivalent' in sys.argv:
+            batch_refresh_asset_workload_equivalent()
+        if 'batch_import_assets_from_files' in sys.argv:
+            batch_import_assets_from_files()
+        if 'batch_fill_file_md5' in sys.argv:
+            batch_fill_file_md5() 

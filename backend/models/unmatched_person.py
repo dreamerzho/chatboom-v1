@@ -2,10 +2,7 @@
 # 用于记录所有未能匹配为员工的发言人及其初步推测角色
 
 from datetime import datetime
-try:
-    from db import db
-except ImportError:
-    from backend.db import db
+from backend.db import db
 
 class UnmatchedPerson(db.Model):
     """

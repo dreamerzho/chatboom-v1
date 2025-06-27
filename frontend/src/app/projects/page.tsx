@@ -125,6 +125,27 @@ interface ProjectDetail {
   };
 }
 
+// 新增类型声明
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+interface EmployeeMapping {
+  id: number;
+  real_name: string;
+}
+
+interface SyncDetail {
+  chatroom_name: string;
+  message_count?: number;
+  status: string;
+  error?: string;
+  first_message_time?: string;
+  last_message_time?: string;
+}
+
 // 获取健康状态配置
 const getHealthStatusConfig = (status: 'good' | 'warning' | 'danger') => {
   const configs = {
@@ -139,7 +160,7 @@ const getHealthStatusConfig = (status: 'good' | 'warning' | 'danger') => {
 // chatGroups: [{ name: string, nickname: string }]
 // 2. 群聊下拉选择项，显示 nickname，存储 nickname
 // TODO: 后续细化类型
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const fetchChatGroups = async (): Promise<{ name: string, nickname: string }[]> => {
   try {
     const response = await syncAPI.getChatrooms();
@@ -192,6 +213,10 @@ function ProjectsPage() {
   // 新增：用于记录当前正在删除的项目ID，实现删除按钮loading
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
 
+  // 1. 新增受控 Modal 状态
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // 获取项目列表并批量加载详情
@@ -202,8 +227,8 @@ function ProjectsPage() {
       const res = await projectAPI.getProjects();
       if (res.success && Array.isArray(res.data)) {
         // 并发请求每个项目详情
-        const detailResults: { success: boolean; data?: ProjectDetail }[] = await Promise.all(
-          (res.data as Project[]).map((proj) => projectAPI.getProjectDetail(proj.id))
+        const detailResults: ApiResponse<ProjectDetail>[] = await Promise.all(
+          (res.data as Project[]).map((proj) => projectAPI.getProjectDetail(proj.id) as Promise<ApiResponse<ProjectDetail>>)
         );
         // 合并统计字段到项目卡片
         const projectsWithStats: Project[] = (res.data as Project[]).map((proj, idx) => {
@@ -242,13 +267,11 @@ function ProjectsPage() {
   };
 
   // 获取员工列表 (新增)
-  // TODO: 后续细化类型
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchEmployees = async () => {
     const response = await employeeAPI.getEmployees();
     if (response.success && response.data) {
       // 后端返回的是EmployeeMapping[], 前端需要的是{id, name}
-      const formattedEmployees = response.data.map((emp: any) => ({
+      const formattedEmployees = (response.data as EmployeeMapping[]).map((emp) => ({
         id: emp.id,
         name: emp.real_name,
       }));
@@ -368,30 +391,6 @@ function ProjectsPage() {
     } finally {
       setDeletingProjectId(null); // 取消loading
     }
-  };
-
-  // 显示删除确认弹窗，支持loading
-  const showDeleteConfirm = (project: Project) => {
-    Modal.confirm({
-      title: '您确定要删除吗？',
-      icon: <ExclamationCircleOutlined />,
-      content: (
-        <div>
-          <p>正在删除项目「{project.project_name}」。此操作将会永久删除该项目及其所有关联的统计数据、文件和聊天记录。</p>
-          <Typography.Text strong style={{ color: '#ff4d4f' }}>
-            此操作无法撤销。
-          </Typography.Text>
-        </div>
-      ),
-      okText: '确认删除',
-      okType: 'danger',
-      cancelText: '取消',
-      // @ts-expect-error AntD Modal.confirm类型不支持confirmLoading，但实际运行无问题
-      confirmLoading: deletingProjectId === project.id, // loading反馈
-      onOk() {
-        return handleDeleteProject(project.id);
-      },
-    });
   };
 
   // 编辑项目
@@ -714,7 +713,10 @@ function ProjectsPage() {
                     icon={<CloseOutlined />}
                     size="small"
                     style={{ position: 'absolute', top: 16, right: 16, border: 'none', background: 'transparent', zIndex: 10 }}
-                    onClick={() => showDeleteConfirm(project)}
+                    onClick={() => {
+                      setProjectToDelete(project);
+                      setDeleteModalVisible(true);
+                    }}
                     loading={deletingProjectId === project.id}
                     aria-label="删除项目"
                   />
@@ -916,7 +918,7 @@ function ProjectsPage() {
             <Descriptions.Item label="新增消息数">{syncResult.total_messages}</Descriptions.Item>
             <Descriptions.Item label="新增文件数">{syncResult.total_files}</Descriptions.Item>
             <Descriptions.Item label="详细结果">
-              {(syncResult.details || []).map((detail: any, i: number) => (
+              {(syncResult.details || []).map((detail: SyncDetail, i: number) => (
                 <Tag key={i} color={detail.status === 'success' ? 'green' : 'red'}>
                   {detail.chatroom_name}: {detail.status}
                 </Tag>
@@ -975,6 +977,34 @@ function ProjectsPage() {
         {syncingProjectId && <Spin size="small" />}
         <div ref={logEndRef} />
       </Card>
+
+      {/* 受控 Modal */}
+      <Modal
+        title="您确定要删除吗？"
+        open={deleteModalVisible}
+        onOk={async () => {
+          if (projectToDelete) {
+            await handleDeleteProject(projectToDelete.id);
+            setDeleteModalVisible(false);
+            setProjectToDelete(null);
+          }
+        }}
+        onCancel={() => {
+          setDeleteModalVisible(false);
+          setProjectToDelete(null);
+        }}
+        okText="确认删除"
+        okType="danger"
+        cancelText="取消"
+        confirmLoading={deletingProjectId === projectToDelete?.id}
+      >
+        <div>
+          <p>正在删除项目「{projectToDelete?.project_name}」。此操作将会永久删除该项目及其所有关联的统计数据、文件和聊天记录。</p>
+          <Typography.Text strong style={{ color: '#ff4d4f' }}>
+            此操作无法撤销。
+          </Typography.Text>
+        </div>
+      </Modal>
     </div>
   );
 }

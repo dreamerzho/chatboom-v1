@@ -19,7 +19,7 @@ from models.unmatched_person import UnmatchedPerson
 from models.file import FileRecord
 from models.chat import ChatMessage
 from models.employee import EmployeeMapping
-from db import db
+from backend.db import db
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import and_, or_
 
@@ -193,7 +193,7 @@ class ChatLogProcessor:
         from models.project import Project, ProjectChatroom
         from models.chat import ChatMessage
         from models.file import FileRecord
-        from db import db
+        from backend.db import db
         import traceback
         
         self._log(f"--- 开始处理项目ID: {self.project_id} 的聊天记录 ---")

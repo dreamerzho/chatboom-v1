@@ -3,10 +3,10 @@
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
+from backend.app import app
+from backend.db import db
 from config import Config
 from chatlog_integration import chatlog_client
 import json
@@ -17,14 +17,6 @@ import logging
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# 创建Flask应用
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = Config.SQLALCHEMY_DATABASE_URI
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# 初始化数据库
-db = SQLAlchemy(app)
 
 # 定义数据库模型
 class Project(db.Model):

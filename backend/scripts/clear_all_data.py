@@ -3,7 +3,7 @@
 # 使用前请确保数据库连接正确，且无重要数据
 
 from app import create_app
-from db import db
+from backend.db import db
 from models.project import Project, ProjectChatroom
 from models.chat import ChatMessage
 from models.file import FileRecord

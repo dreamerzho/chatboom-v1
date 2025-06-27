@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import joinedload
 
-from db import db
+from backend.db import db
 from models.employee import EmployeeMapping
 from models.project import Project, ProjectChatroom
 from models.file import FileRecord, FileVersion
@@ -63,19 +63,20 @@ class DataManager:
                 project_id=project_id,
                 force_resync=force_resync
             )
-            
-            # 同步完成后，可以选择性地更新项目统计数据
+            # 新增：同步完成后自动归档资产
             if sync_result.get('success'):
                 project = Project.query.get(project_id)
                 if project:
                     self._update_project_stats(project)
                     logger.info(f"DataManager: 项目ID {project_id} 的统计数据已更新。")
+                    # 自动归档资产
+                    self._save_sync_results(project, sync_result)
+                    logger.info(f"DataManager: 项目ID {project_id} 的资产已自动归档。");
 
             return {
                 'success': sync_result.get('success', False),
                 'data': sync_result
             }
-            
         except Exception as e:
             logger.error(f"DataManager: 同步项目ID {project_id} 数据失败: {e}", exc_info=True)
             return {

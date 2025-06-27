@@ -3,10 +3,7 @@
 # 支持V2精准评估模型的WE计算和负荷指数分析
 
 from datetime import datetime
-try:
-    from db import db
-except ImportError:
-    from backend.db import db
+from backend.db import db
 
 class WorkloadRecord(db.Model):
     """

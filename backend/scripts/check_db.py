@@ -3,7 +3,7 @@
 
 from app import create_app
 from models import Project, ProjectChatroom
-from db import db
+from backend.db import db
 
 def check_projects():
     """检查数据库中的项目数据"""

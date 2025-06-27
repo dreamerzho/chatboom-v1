@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request, current_app
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_, desc
 import logging
-from db import db
+from backend.db import db
 from models import FileRecord  # 添加 FileRecord 模型导入
 
 # 创建文件管理蓝图
