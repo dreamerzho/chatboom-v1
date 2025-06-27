@@ -17,6 +17,7 @@ if config.config_file_name is not None:
 # 添加模型导入 - 修复循环导入问题
 import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 # 添加当前目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,15 +25,15 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 
 # 导入数据库和所有模型
-from db import db
+from backend.db import db
 
 # 导入所有模型以确保它们被注册到metadata中
-from models.employee import EmployeeMapping
-from models.project import Project, ProjectChatroom
-from models.file import FileRecord, FileVersion
-from models.chat import ChatMessage
-from models.keyword import KeywordCategory
-from models.asset import Asset, AssetAnalysis
+from backend.models.employee import EmployeeMapping
+from backend.models.project import Project, ProjectChatroom
+from backend.models.file import FileRecord, FileVersion
+from backend.models.chat import ChatMessage
+from backend.models.keyword import KeywordCategory
+from backend.models.asset import Asset, AssetAnalysis
 
 # 设置target_metadata用于自动生成迁移
 target_metadata = db.metadata

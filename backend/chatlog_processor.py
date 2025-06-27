@@ -174,7 +174,7 @@ class ChatLogProcessor:
         self._log(f"成功加载 {len(employee_list)} 条员工信息。")
         return employee_list
 
-    def process_chatlogs(self) -> Dict[str, Any]:
+    def process_chatlogs(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
         处理并同步项目的聊天记录（只通过chatlogAPI获取）
         基于 seq 字段进行高效去重，使用数据库级别的 UPSERT 操作
@@ -184,6 +184,10 @@ class ChatLogProcessor:
         3. 用process_and_deduplicate处理消息，批量入库ChatMessage和FileRecord。
         4. 统计消息数、文件数，返回真实统计。
         5. 日志详细，异常处理健壮。
+        
+        参数:
+            start_date: 开始日期 (YYYY-MM-DD)，如果为None则使用最近7天
+            end_date: 结束日期 (YYYY-MM-DD)，如果为None则使用今天
         """
         from chatlog_integration import ChatlogIntegration
         from models.project import Project, ProjectChatroom
@@ -205,6 +209,15 @@ class ChatLogProcessor:
                 self._log(f"项目未配置任何群聊，无法同步")
                 return {'success': False, 'message': '项目未配置任何群聊', 'logs': []}
             
+            # 设置时间范围
+            from datetime import datetime, timedelta
+            if not end_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            
+            self._log(f"📅 同步时间范围: {start_date} ~ {end_date}")
+            
             chatlog_client = ChatlogIntegration()
             total_messages = 0
             total_files = 0
@@ -216,10 +229,7 @@ class ChatLogProcessor:
                 group_type = chatroom.chatroom_type
                 self._log(f"同步群聊：{group_name}（类型：{group_type}）...")
                 
-                # 拉取该群的所有消息
-                from datetime import datetime, timedelta
-                end_date = datetime.now().strftime('%Y-%m-%d')
-                start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+                # 拉取该群的消息
                 msgs = chatlog_client.get_chatlog_by_talker_and_time(
                     talker=group_name,
                     start_date=start_date,
@@ -228,10 +238,10 @@ class ChatLogProcessor:
                 self._log(f"获取到 {len(msgs)} 条消息，开始解析...")
                 
                 group_info = {'name': group_name, 'type': group_type}
-                result = self.process_and_deduplicate(msgs, group_info)
+                dedup_result = self.process_and_deduplicate(msgs, group_info)
                 
                 # 批量入库消息（使用 UPSERT 防止重复报错）
-                chat_messages = result['chat_messages']
+                chat_messages = dedup_result['chat_messages']
                 if chat_messages:
                     try:
                         # 构建插入语句，使用 ON CONFLICT DO NOTHING 进行去重
@@ -253,11 +263,14 @@ class ChatLogProcessor:
                         do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
                             index_elements=['project_id', 'message_id']
                         )
-                        result = db.session.execute(do_nothing_stmt)
+                        insert_result = db.session.execute(do_nothing_stmt)
                         db.session.commit()
                         
                         # 统计实际插入的记录数
-                        inserted_count = result.rowcount if hasattr(result, 'rowcount') else len(chat_messages)
+                        try:
+                            inserted_count = insert_result.rowcount if hasattr(insert_result, 'rowcount') else len(chat_messages)
+                        except:
+                            inserted_count = len(chat_messages)  # 如果无法获取 rowcount，使用原始数量
                         total_messages += inserted_count
                         all_new_msgs.extend(chat_messages)
                         self._log(f"群聊 {group_name} 批量入库消息 {inserted_count} 条（已自动跳过重复消息）。")
@@ -267,7 +280,7 @@ class ChatLogProcessor:
                         self._log(f"消息批量入库失败: {e}")
                 
                 # 批量入库文件（使用 UPSERT 进行去重）
-                file_records = result['file_records']
+                file_records = dedup_result['file_records']
                 if file_records:
                     try:
                         # 构建文件插入语句
@@ -291,15 +304,18 @@ class ChatLogProcessor:
                             for file in file_records
                         ])
                         
-                        # 使用复合唯一约束进行去重
+                        # 使用新的唯一约束进行去重
                         file_do_nothing_stmt = file_insert_stmt.on_conflict_do_nothing(
-                            index_elements=['message_seq', 'original_name']
+                            index_elements=['project_id', 'chatroom_name', 'original_name']
                         )
-                        file_result = db.session.execute(file_do_nothing_stmt)
+                        file_insert_result = db.session.execute(file_do_nothing_stmt)
                         db.session.commit()
                         
                         # 统计实际插入的文件数
-                        inserted_file_count = file_result.rowcount if hasattr(file_result, 'rowcount') else len(file_records)
+                        try:
+                            inserted_file_count = file_insert_result.rowcount if hasattr(file_insert_result, 'rowcount') else len(file_records)
+                        except:
+                            inserted_file_count = len(file_records)  # 如果无法获取 rowcount，使用原始数量
                         total_files += inserted_file_count
                         all_new_files.extend(file_records)
                         self._log(f"群聊 {group_name} 批量入库文件 {inserted_file_count} 条（已自动跳过重复文件）。")

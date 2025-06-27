@@ -2,7 +2,10 @@
 # 包含聊天消息、消息类型等模型定义
 
 from datetime import datetime
-from db import db
+try:
+    from db import db
+except ImportError:
+    from backend.db import db
 from sqlalchemy import UniqueConstraint
 
 class ChatMessage(db.Model):

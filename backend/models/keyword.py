@@ -2,7 +2,10 @@
 # 包含关键词分类、关键词统计、情感分析等模型定义
 
 from datetime import datetime
-from db import db
+try:
+    from db import db
+except ImportError:
+    from backend.db import db
 
 class KeywordCategory(db.Model):
     """

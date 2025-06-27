@@ -366,7 +366,7 @@ def get_sync_status():
 def get_chatrooms():
     """
     获取所有可用的微信群聊列表
-    从 chatlog 服务获取群聊信息
+    from chatlog 服务获取群聊信息
     """
     try:
         chatrooms = chatlog_client.get_chatrooms()
@@ -390,24 +390,22 @@ def sync_project_data_stream(project_id: int):
     """
     # 从请求体获取参数
     data = request.get_json() or {}
-    # 支持 'YYYY-MM-DD' 或 'YYYYMMDD' 格式
-    date_str_input = data.get('date') 
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    sync_type = data.get('sync_type', 'all')
+    chatroom_names = data.get('chatroom_names', [])
+    force_resync = data.get('force_resync', False)
     
-    # 将日期格式统一为 YYYYMMDD
-    date_str = None
-    if date_str_input:
-        try:
-            # 替换掉非数字字符
-            cleaned_date = re.sub(r'\D', '', date_str_input)
-            # 验证长度
-            if len(cleaned_date) == 8:
-                # 尝试解析以确认是有效日期
-                datetime.strptime(cleaned_date, '%Y%m%d')
-                date_str = cleaned_date
-            else:
-                logger.warning(f"接收到无效的日期格式: {date_str_input}, 将忽略日期筛选。")
-        except ValueError:
-            logger.warning(f"接收到无效的日期: {date_str_input}, 将忽略日期筛选。")
+    # 参数校验
+    if not start_date or not end_date:
+        def generate_error_response():
+            error_entry = {
+                "type": "error",
+                "timestamp": datetime.now().isoformat(),
+                "message": "必须指定起止日期"
+            }
+            yield f"data: {json.dumps(error_entry, ensure_ascii=False)}\n\n"
+        return Response(stream_with_context(generate_error_response()), mimetype='text/event-stream')
 
     def generate_sync_data():
         # 发送日志的辅助函数
@@ -422,35 +420,58 @@ def sync_project_data_stream(project_id: int):
 
         try:
             yield_log(f"✅ 开始为项目ID {project_id} 同步数据...")
-            if date_str:
-                yield_log(f"📅 指定日期: {date_str}")
+            yield_log(f"📅 时间范围: {start_date} ~ {end_date}")
+            yield_log(f"🔄 同步类型: {sync_type}")
 
             time.sleep(1) # 暂停一下，让前端能渲染出第一条日志
 
-            # 1. 初始化处理器
-            processor = ChatLogProcessor(
-                project_id=project_id,
-                date_str=date_str, 
-                yield_log=yield_log
-            )
+            # 1. 获取项目信息
+            project = Project.query.get(project_id)
+            if not project:
+                yield_log(f"❌ 项目ID {project_id} 不存在")
+                return
             
-            # 2. 执行核心处理逻辑
-            result = processor.process_chatlogs()
+            yield_log(f"📋 项目名称: {project.project_name}")
 
-            # 3. 准备最终的同步结果报告
+            # 2. 确定要同步的群聊列表
+            if chatroom_names:
+                target_chatrooms = chatroom_names
+                yield_log(f"🎯 指定群聊: {', '.join(target_chatrooms)}")
+            else:
+                target_chatrooms = []
+                project_chatrooms = project.chatrooms.all()
+                for chatroom in project_chatrooms:
+                    target_chatrooms.append(chatroom.chatroom_name)
+                yield_log(f"🎯 项目群聊: {', '.join(target_chatrooms)}")
+            
+            if not target_chatrooms:
+                yield_log("❌ 项目未配置群聊，请先配置群聊信息")
+                return
+
+            # 3. 初始化处理器并执行同步
+            processor = ChatLogProcessor(project_id=project_id, yield_log=yield_log)
+            
+            # 4. 执行核心处理逻辑
+            result = processor.process_chatlogs(start_date=start_date, end_date=end_date)
+
+            # 5. 准备最终的同步结果报告
             final_report = {
                 "project_id": project_id,
-                "sync_type": "stream",
-                "total_chatrooms": result.get("total_chatrooms", 0),
-                "total_messages": result.get("summary", {}).get("total_new_messages", 0),
-                "total_files": result.get("summary", {}).get("total_new_files", 0),
-                "details": result.get("details", []),
+                "project_name": project.project_name,
+                "start_date": start_date,
+                "end_date": end_date,
+                "sync_type": sync_type,
+                "total_chatrooms": len(target_chatrooms),
+                "total_messages": result.get("total_messages", 0),
+                "total_files": result.get("total_files", 0),
+                "success": result.get("success", False),
+                "message": result.get("message", ""),
                 "timestamp": datetime.now().isoformat()
             }
 
             yield_log("✅ 数据同步流程完成。")
 
-            # 4. 发送最终结果
+            # 6. 发送最终结果
             result_entry = {
                 "type": "result",
                 "data": final_report
@@ -633,22 +654,21 @@ def sync_project_data_by_id(project_id: int):
                     chat_messages = chatlog_results.get('chat_messages', [])
                     if chat_messages:
                         for msg_data in chat_messages:
-                            # 检查是否已存在（基于seq去重）
-                            existing_msg = ChatMessage.query.filter_by(seq=msg_data['seq']).first()
+                            # 检查是否已存在（基于message_id去重）
+                            existing_msg = ChatMessage.query.filter_by(
+                                message_id=msg_data.get('seq'),
+                                project_id=project_id
+                            ).first()
                             if not existing_msg:
                                 chat_msg = ChatMessage(
-                                    message_id=msg_data.get('seq'),
-                                    seq=msg_data.get('seq'),
-                                    time=msg_data.get('time'),
-                                    talker=msg_data.get('talker'),
+                                    message_id=msg_data.get('seq'),  # 使用 seq 作为 message_id
                                     talker_name=msg_data.get('talker_name'),
-                                    sender=msg_data.get('sender'),
                                     sender_name=msg_data.get('sender_name'),
-                                    is_self=msg_data.get('is_self'),
-                                    type=msg_data.get('type'),
-                                    sub_type=msg_data.get('sub_type'),
+                                    message_type=str(msg_data.get('type', '文本')),
                                     content=msg_data.get('content'),
-                                    employee_id=msg_data.get('employee_id')
+                                    timestamp=datetime.fromtimestamp(msg_data.get('time', 0)) if msg_data.get('time') else datetime.utcnow(),
+                                    project_id=project_id,
+                                    created_at=datetime.utcnow()
                                 )
                                 db.session.add(chat_msg)
                         

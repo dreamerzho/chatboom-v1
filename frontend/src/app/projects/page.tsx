@@ -779,12 +779,12 @@ function ProjectsPage() {
       <Modal
         title={editingProject ? '编辑项目' : '新建项目'}
         open={modalVisible}
-        onOk={handleSubmit}
-        onCancel={handleCancel}
+        onOk={handleSubmit || (() => {})}
+        onCancel={handleCancel || (() => {})}
         width={600}
         okText={editingProject ? '保存' : '创建项目'}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}
@@ -915,8 +915,8 @@ function ProjectsPage() {
             <Descriptions.Item label="失败群聊数">{syncResult.failed_count > 0 ? <Text type="danger">{syncResult.failed_count}</Text> : 0}</Descriptions.Item>
             <Descriptions.Item label="新增消息数">{syncResult.total_messages}</Descriptions.Item>
             <Descriptions.Item label="新增文件数">{syncResult.total_files}</Descriptions.Item>
-            <Descriptions.Item label="详细信息">
-              {syncResult.details.map((detail: any, i: number) => (
+            <Descriptions.Item label="详细结果">
+              {(syncResult.details || []).map((detail: any, i: number) => (
                 <Tag key={i} color={detail.status === 'success' ? 'green' : 'red'}>
                   {detail.chatroom_name}: {detail.status}
                 </Tag>
@@ -946,7 +946,7 @@ function ProjectsPage() {
         okText="开始同步"
         cancelText="取消"
         confirmLoading={!!syncingProjectId}
-        destroyOnClose
+        destroyOnHidden
       >
         <div style={{ marginBottom: 16 }}>
           <span>请选择同步时间范围：</span>

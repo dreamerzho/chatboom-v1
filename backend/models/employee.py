@@ -2,7 +2,10 @@
 # 包含员工映射、角色管理等模型定义
 
 from datetime import datetime
-from db import db
+try:
+    from db import db
+except ImportError:
+    from backend.db import db
 
 class EmployeeMapping(db.Model):
     """

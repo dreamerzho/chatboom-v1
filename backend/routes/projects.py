@@ -42,6 +42,8 @@ def get_projects():
                     'created_at': c.created_at.isoformat() if c.created_at else None
                 } for c in chatrooms
             ]
+            # 新增：统计文件数量
+            file_count = FileRecord.query.filter_by(project_id=project.id).count()
             project_list.append({
                 'id': project.id,
                 'project_name': project.project_name,
@@ -53,7 +55,8 @@ def get_projects():
                 'updated_at': project.updated_at.isoformat() if project.updated_at else None,
                 'chatrooms': chatrooms_dict,
                 'internal_chat_groups': internal_chat_groups,
-                'external_chat_groups': external_chat_groups
+                'external_chat_groups': external_chat_groups,
+                'file_count': file_count  # 新增字段
             })
         return jsonify({
             'success': True,

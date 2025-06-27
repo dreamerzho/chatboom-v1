@@ -2,7 +2,10 @@
 # 包含项目信息、项目与群聊多对多关系等模型定义
 
 from datetime import datetime
-from db import db
+try:
+    from db import db
+except ImportError:
+    from backend.db import db
 
 class Project(db.Model):
     """

@@ -2,7 +2,10 @@
 # 包含文件记录、文件命名规范验证等模型定义
 
 from datetime import datetime
-from db import db
+try:
+    from db import db
+except ImportError:
+    from backend.db import db
 from sqlalchemy import UniqueConstraint
 
 class FileRecord(db.Model):
@@ -46,7 +49,7 @@ class FileRecord(db.Model):
     
     # 复合唯一约束：确保同一消息中的同一文件不会重复记录
     __table_args__ = (
-        UniqueConstraint('message_seq', 'original_name', name='uq_message_file'),
+        UniqueConstraint('project_id', 'chatroom_name', 'original_name', name='uq_project_chatroom_filename'),
     )
     
     def to_dict(self):
