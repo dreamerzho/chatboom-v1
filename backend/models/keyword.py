@@ -77,7 +77,7 @@ class KeywordAnalysis(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     analysis_date = db.Column(db.Date, nullable=False)  # 分析日期
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'))  # 关联项目
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'))  # 关联项目
     employee_id = db.Column(db.Integer, db.ForeignKey('employee_mappings.id'))  # 关联员工
     chatroom_name = db.Column(db.String(128))  # 群聊名称
     

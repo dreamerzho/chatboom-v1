@@ -19,7 +19,7 @@ class WorkloadRecord(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employee_mappings.id'), nullable=False)  # 员工ID
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)  # 项目ID
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False)  # 项目ID
     date = db.Column(db.Date, nullable=False)  # 工作日期
     role = db.Column(db.String(32), nullable=False)  # 岗位类型：设计/文案/PM/AE
     output_type = db.Column(db.String(64), nullable=False)  # 产出类型：最终版-海报/过程迭代版本/内部修改意见/外部群沟通等

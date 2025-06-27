@@ -17,7 +17,7 @@ class RiskEvent(db.Model):
     __table_args__ = {'extend_existing': True}
 
     id = db.Column(db.Integer, primary_key=True)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)  # 项目ID
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False)  # 项目ID
     employee_id = db.Column(db.Integer, db.ForeignKey('employee_mappings.id'))  # 员工ID（可选）
     event_type = db.Column(db.String(32), nullable=False)  # 事件类型（高迭代/定稿周期异常/情绪预警等）
     event_desc = db.Column(db.String(256))  # 事件描述

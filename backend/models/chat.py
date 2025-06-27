@@ -27,7 +27,7 @@ class ChatMessage(db.Model):
     file_name = db.Column(db.String(256))  # 文件名（当消息类型为文件时）
     timestamp = db.Column(db.DateTime, nullable=False)  # 消息时间戳
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'))  # 关联的项目ID
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'))  # 关联的项目ID
     message_subtype = db.Column(db.Integer)  # 消息子类型
     type = db.Column(db.Integer)  # 消息类型（别名，用于兼容）
     

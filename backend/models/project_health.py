@@ -17,7 +17,7 @@ class ProjectHealthStats(db.Model):
     __table_args__ = {'extend_existing': True}
     
     id = db.Column(db.Integer, primary_key=True)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)  # 项目ID
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False)  # 项目ID
     period = db.Column(db.String(16), nullable=False)  # 统计周期（如7d/30d/90d）
     health_score = db.Column(db.Integer, nullable=False)  # 健康分
     avg_time_to_final = db.Column(db.Float)  # 平均定稿周期（小时）
@@ -55,7 +55,7 @@ class ProjectDifficultyIndex(db.Model):
     __tablename__ = 'project_difficulty_indices'
     
     id = db.Column(db.Integer, primary_key=True)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)  # 项目ID
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False)  # 项目ID
     
     # 难度评估指标
     complexity_score = db.Column(db.Float, default=50.0)  # 复杂度评分 (0-100)

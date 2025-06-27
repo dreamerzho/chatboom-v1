@@ -36,7 +36,7 @@ class Asset(db.Model):
     
     # --- 关联关系 ---
     author_id = db.Column(db.Integer, db.ForeignKey('employee_mappings.id'))  # 作者 (关联到 EmployeeMapping)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'))  # 所属项目 (关联到 Project)
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'))  # 所属项目 (关联到 Project)
     
     # --- 由 AnalysisService 计算出的分析指标 ---
     workload_equivalent = db.Column(db.Float)  # 工作量当量 (WE)
