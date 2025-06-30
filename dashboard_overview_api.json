@@ -1,0 +1,140 @@
+{
+  "data": {
+    "kpis": {
+      "avg_finalize_hours": {
+        "change": 0,
+        "trend": [],
+        "value": 0
+      },
+      "pending_risks": 7,
+      "project_health": {
+        "healthy": 2,
+        "risk": 0,
+        "warning": 0
+      },
+      "team_load": {
+        "high": 0,
+        "low": 0,
+        "medium": 0
+      }
+    },
+    "project_risks": [
+      {
+        "health_score": 100.0,
+        "main_risk": "-",
+        "project_id": 2,
+        "project_name": "\u80e4\u749e",
+        "risk_level": "low"
+      },
+      {
+        "health_score": 100.0,
+        "main_risk": "-",
+        "project_id": 11,
+        "project_name": "skp",
+        "risk_level": "low"
+      }
+    ],
+    "team_performance": {
+      "copywriting": [
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 6,
+          "output_we": 0,
+          "position": "\u6587\u6848",
+          "process_we": 0.0,
+          "real_name": "\u5434\u6631\u8fbe"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 7,
+          "output_we": 0,
+          "position": "\u6587\u6848\u603b\u76d1",
+          "process_we": 0.0,
+          "real_name": "\u540e\u535a\u5bd2"
+        }
+      ],
+      "design": [
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 8,
+          "output_we": 0,
+          "position": "\u8bbe\u8ba1",
+          "process_we": 0.0,
+          "real_name": "\u5468\u5eb7"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 9,
+          "output_we": 0,
+          "position": "\u8bbe\u8ba1\u603b\u76d1",
+          "process_we": 0.0,
+          "real_name": "\u6bdb\u6653\u6167"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 10,
+          "output_we": 0,
+          "position": "\u5916\u5305\u8bbe\u8ba1",
+          "process_we": 0.0,
+          "real_name": "\u5218\u9274\u8f89"
+        }
+      ],
+      "pm_ae": [
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 2,
+          "output_we": 0,
+          "position": "\u9879\u76ee\u7ecf\u7406",
+          "process_we": 0.0,
+          "real_name": "\u8c22\u5efa\u950b"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 3,
+          "output_we": 0,
+          "position": "\u9879\u76ee\u7ecf\u7406",
+          "process_we": 0.0,
+          "real_name": "\u8d75\u7ee7\u5eb7"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 4,
+          "output_we": 0,
+          "position": "\u9879\u76ee\u7ecf\u7406",
+          "process_we": 0.0,
+          "real_name": "\u5d14\u83b2"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 5,
+          "output_we": 0,
+          "position": "AE",
+          "process_we": 0.0,
+          "real_name": "\u6bb7\u7433"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 11,
+          "output_we": 0,
+          "position": "\u5916\u5305\u89c6\u9891",
+          "process_we": 0.0,
+          "real_name": "\u738b\u5a01\u51ef"
+        },
+        {
+          "avg_iteration": 0.0,
+          "employee_id": 12,
+          "output_we": 0,
+          "position": "\u5916\u5305\u89c6\u9891",
+          "process_we": 0.0,
+          "real_name": "\u8d75\u5f6c\u5f6c"
+        }
+      ]
+    },
+    "workload_trends": []
+  },
+  "success": true,
+  "time_range": {
+    "end_date": "2025-06-30",
+    "start_date": "2025-06-23"
+  }
+}

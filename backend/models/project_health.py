@@ -25,7 +25,7 @@ class ProjectHealthStats(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # 关联关系
-    project = db.relationship('Project', backref='health_stats')
+    project = db.relationship('Project', backref=db.backref('health_stats', passive_deletes=True))
     
     def to_dict(self):
         """转换为字典格式，用于API响应"""

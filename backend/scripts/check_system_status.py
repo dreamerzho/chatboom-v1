@@ -14,10 +14,10 @@ from backend.app import app
 from backend.db import db
 
 # 导入模型
-from models.employee import EmployeeMapping
-from models.project import Project
-from models.file import FileRecord
-from models.chat import ChatMessage
+from backend.models.employee import EmployeeMapping
+from backend.models.project import Project
+from backend.models.file import FileRecord
+from backend.models.chat import ChatMessage
 
 def check_database_status():
     """检查数据库状态"""

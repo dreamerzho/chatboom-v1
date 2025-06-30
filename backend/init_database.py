@@ -8,15 +8,15 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask
-from config import Config
+from backend.config import Config
 from backend.db import db
 
 # 导入所有模型以确保它们被注册
-from models.employee import EmployeeMapping
-from models.project import Project, ProjectChatroom
-from models.file import FileRecord, FileVersion
-from models.chat import ChatMessage
-from models.keyword import KeywordCategory
+from backend.models.employee import EmployeeMapping
+from backend.models.project import Project, ProjectChatroom
+from backend.models.file import FileRecord, FileVersion
+from backend.models.chat import ChatMessage
+from backend.models.keyword import KeywordCategory
 
 def create_database():
     """

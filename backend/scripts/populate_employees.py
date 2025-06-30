@@ -10,7 +10,7 @@ from contextlib import contextmanager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app
-from models.employee import EmployeeMapping
+from backend.models.employee import EmployeeMapping
 from db import db
 
 @contextmanager

@@ -3,7 +3,7 @@
 
 from app import app
 from db import db
-from models.workload import WorkloadRecord
+from backend.models.workload import WorkloadRecord
 
 with app.app_context():
     records = db.session.query(WorkloadRecord).filter_by(project_id=7).all()

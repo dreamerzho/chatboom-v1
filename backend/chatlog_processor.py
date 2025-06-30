@@ -14,14 +14,15 @@ from typing import Dict, List, Optional, Any, Tuple, Callable
 from difflib import SequenceMatcher
 import json
 import os
-from models.project import Project
-from models.unmatched_person import UnmatchedPerson
-from models.file import FileRecord
-from models.chat import ChatMessage
-from models.employee import EmployeeMapping
+from backend.models.project import Project
+from backend.models.unmatched_person import UnmatchedPerson
+from backend.models.file import FileRecord
+from backend.models.chat import ChatMessage
+from backend.models.employee import EmployeeMapping
 from backend.db import db
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import and_, or_
+# from backend.chatlog_integration import ChatlogIntegration  # 移除顶部导入，避免循环依赖
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +190,9 @@ class ChatLogProcessor:
             start_date: 开始日期 (YYYY-MM-DD)，如果为None则使用最近7天
             end_date: 结束日期 (YYYY-MM-DD)，如果为None则使用今天
         """
-        from chatlog_integration import ChatlogIntegration
-        from models.project import Project, ProjectChatroom
-        from models.chat import ChatMessage
-        from models.file import FileRecord
+        from backend.models.project import Project, ProjectChatroom
+        from backend.models.chat import ChatMessage
+        from backend.models.file import FileRecord
         from backend.db import db
         import traceback
         
@@ -282,47 +282,62 @@ class ChatLogProcessor:
                 # 批量入库文件（使用 UPSERT 进行去重）
                 file_records = dedup_result['file_records']
                 if file_records:
-                    try:
-                        # 构建文件插入语句
-                        file_insert_stmt = insert(FileRecord).values([
-                            {
+                    valid_files = []
+                    for file in file_records:
+                        try:
+                            # 字段校验与默认值
+                            filename = file.get('filename', '') or ''
+                            group_name = file.get('group_name', '') or ''
+                            file_type = file.get('file_type', '') or ''
+                            uploader_id = str(file.get('uploader_id')) if file.get('uploader_id') else ''
+                            upload_time = file.get('upload_time') or datetime.utcnow()
+                            # 唯一性校验（project_id+chatroom_name+original_name）
+                            exists = FileRecord.query.filter_by(
+                                project_id=self.project_id,
+                                chatroom_name=group_name,
+                                original_name=filename
+                            ).first()
+                            if exists:
+                                self._log(f"跳过重复文件: {filename} (群聊={group_name})")
+                                continue
+                            # 校验通过，加入待插入列表
+                            valid_files.append({
                                 'project_id': self.project_id,
                                 'project_name': project.project_name,
-                                'chatroom_name': file.get('group_name'),
-                                'original_name': file.get('filename'),
-                                'standardized_name': file.get('filename'),
+                                'chatroom_name': group_name,
+                                'original_name': filename,
+                                'standardized_name': filename,
                                 'author_abbreviation': file.get('parsed_author_abbreviation') or '',
                                 'version': file.get('parsed_version') or '',
-                                'file_extension': file.get('file_type') or '',
-                                'upload_time': file.get('upload_time'),
-                                'uploader': str(file.get('uploader_id')) if file.get('uploader_id') else '',
+                                'file_extension': file_type,
+                                'upload_time': upload_time,
+                                'uploader': uploader_id,
                                 'status': 'pending',
                                 'message_seq': file.get('message_seq') if file.get('message_seq') else None,
                                 'created_at': datetime.utcnow(),
                                 'updated_at': datetime.utcnow()
-                            }
-                            for file in file_records
-                        ])
-                        
-                        # 使用新的唯一约束进行去重
-                        file_do_nothing_stmt = file_insert_stmt.on_conflict_do_nothing(
-                            index_elements=['project_id', 'chatroom_name', 'original_name']
-                        )
-                        file_insert_result = db.session.execute(file_do_nothing_stmt)
-                        db.session.commit()
-                        
-                        # 统计实际插入的文件数
+                            })
+                        except Exception as e:
+                            self._log(f"单条文件数据校验异常: {file} - {str(e)}")
+                            continue
+                    if valid_files:
                         try:
-                            inserted_file_count = file_insert_result.rowcount if hasattr(file_insert_result, 'rowcount') else len(file_records)
-                        except:
-                            inserted_file_count = len(file_records)  # 如果无法获取 rowcount，使用原始数量
-                        total_files += inserted_file_count
-                        all_new_files.extend(file_records)
-                        self._log(f"群聊 {group_name} 批量入库文件 {inserted_file_count} 条（已自动跳过重复文件）。")
-                        
-                    except Exception as e:
-                        db.session.rollback()
-                        self._log(f"文件批量入库失败: {e}")
+                            file_insert_stmt = insert(FileRecord).values(valid_files)
+                            file_do_nothing_stmt = file_insert_stmt.on_conflict_do_nothing(
+                                index_elements=['project_id', 'chatroom_name', 'original_name']
+                            )
+                            file_insert_result = db.session.execute(file_do_nothing_stmt)
+                            db.session.commit()
+                            try:
+                                inserted_file_count = file_insert_result.rowcount if hasattr(file_insert_result, 'rowcount') else len(valid_files)
+                            except:
+                                inserted_file_count = len(valid_files)
+                            total_files += inserted_file_count
+                            all_new_files.extend(valid_files)
+                            self._log(f"群聊 {group_name} 批量入库文件 {inserted_file_count} 条（已自动跳过异常和重复文件）。")
+                        except Exception as e:
+                            db.session.rollback()
+                            self._log(f"文件批量入库失败: {e}")
                 
                 self._log(f"群聊 {group_name} 处理完成。")
             

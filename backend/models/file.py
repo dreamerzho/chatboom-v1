@@ -4,6 +4,7 @@
 from datetime import datetime
 from backend.db import db
 from sqlalchemy import UniqueConstraint
+from backend.models.project import Project
 
 class FileRecord(db.Model):
     """
@@ -48,6 +49,8 @@ class FileRecord(db.Model):
     __table_args__ = (
         UniqueConstraint('project_id', 'chatroom_name', 'original_name', name='uq_project_chatroom_filename'),
     )
+    
+    project = db.relationship('Project', backref=db.backref('file_records', passive_deletes=True))
     
     def to_dict(self):
         """转换为字典格式，用于API响应"""

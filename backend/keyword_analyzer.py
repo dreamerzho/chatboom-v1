@@ -15,10 +15,10 @@ from collections import Counter, defaultdict
 import jieba
 import jieba.analyse
 
-from models.keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKeyword
-from models.chat import ChatMessage
-from models.employee import EmployeeMapping
-from models.project import Project
+from backend.models.keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKeyword
+from backend.models.chat import ChatMessage
+from backend.models.employee import EmployeeMapping
+from backend.models.project import Project
 from backend.db import db
 
 logger = logging.getLogger(__name__)

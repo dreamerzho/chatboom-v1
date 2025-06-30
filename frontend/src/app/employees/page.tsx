@@ -40,7 +40,7 @@ import {
   SearchOutlined,
   QuestionCircleOutlined
 } from '@ant-design/icons';
-import { employeeAPI, unmatchedAPI, projectAPI } from '../../lib/api';
+import { employeeAPI, unmatchedAPI, projectAPI } from '@lib/api';
 import Link from 'next/link';
 import { TableProps } from 'antd';
 import * as XLSX from 'xlsx'; // 用于Excel解析

@@ -33,6 +33,8 @@ class ChatMessage(db.Model):
         UniqueConstraint('project_id', 'message_id', name='uq_project_message'),
     )
     
+    project = db.relationship('Project', backref=db.backref('chat_messages', passive_deletes=True))
+    
     def to_dict(self):
         """转换为字典格式，用于API响应"""
         return {

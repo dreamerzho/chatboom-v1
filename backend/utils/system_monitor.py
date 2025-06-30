@@ -9,6 +9,7 @@ from typing import Dict, Any, List
 import logging
 from backend.db import db
 from sqlalchemy import text
+from backend.utils import APIResponse, ValidationHelper
 
 logger = logging.getLogger(__name__)
 
@@ -176,13 +177,13 @@ class SystemMonitor:
             # 检查关键模块导入
             modules_status = {}
             try:
-                from models import EmployeeMapping, Project, FileRecord, ChatMessage
+                from backend.models import EmployeeMapping, Project, FileRecord, ChatMessage
                 modules_status["models"] = "ok"
             except Exception as e:
                 modules_status["models"] = f"error: {str(e)}"
             
             try:
-                from routes import employees_bp, projects_bp, files_bp
+                from backend.routes import employees_bp, projects_bp, files_bp
                 modules_status["routes"] = "ok"
             except Exception as e:
                 modules_status["routes"] = f"error: {str(e)}"

@@ -9,14 +9,14 @@ from sqlalchemy import func, and_, or_, desc
 from sqlalchemy.orm import joinedload
 
 from backend.db import db
-from models.workload import WorkloadRecord, EmployeeLoadBaseline, WorkloadWeights
-from models.employee import EmployeeMapping
-from models.project import Project
-from models.file import FileRecord
-from models.chat import ChatMessage
-from parser_service import ParserService
-from analysis_service import AnalysisService
-from utils import APIResponse, ValidationHelper, PaginationHelper
+from backend.models.workload import WorkloadRecord, EmployeeLoadBaseline, WorkloadWeights
+from backend.models.employee import EmployeeMapping
+from backend.models.project import Project
+from backend.models.file import FileRecord
+from backend.models.chat import ChatMessage
+from backend.parser_service import ParserService
+from backend.analysis_service import AnalysisService
+from backend.utils import APIResponse, ValidationHelper, PaginationHelper
 
 # 创建蓝图
 workload_bp = Blueprint('workload', __name__, url_prefix='/api/v1/workload')

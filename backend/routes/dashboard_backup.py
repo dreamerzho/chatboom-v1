@@ -6,12 +6,12 @@ from datetime import datetime, timedelta, date
 from sqlalchemy import func, and_, desc
 import logging
 from backend.db import db
-from models.workload import WorkloadRecord
-from models.project_health import ProjectHealthStats
-from models.risk_event import RiskEvent
-from models import ChatMessage, FileRecord, Project, EmployeeMapping, ProjectChatroom
-from analysis_service import AnalysisService
-from models.asset import Asset, AssetAnalysis
+from backend.models.workload import WorkloadRecord
+from backend.models.project_health import ProjectHealthStats
+from backend.models.risk_event import RiskEvent
+from backend.models import ChatMessage, FileRecord, Project, EmployeeMapping, ProjectChatroom
+from backend.analysis_service import AnalysisService
+from backend.models.asset import Asset, AssetAnalysis
 
 # 创建仪表盘蓝图
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/v1/dashboard')

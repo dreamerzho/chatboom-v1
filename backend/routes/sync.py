@@ -12,14 +12,14 @@ import time
 import re
 
 # 导入数据库模型和 chatlog 集成
-from models.project import Project
-from models.chat import ChatMessage
-from models.file import FileRecord
-from models.employee import EmployeeMapping
-from chatlog_integration import chatlog_client
+from backend.models.project import Project
+from backend.models.chat import ChatMessage
+from backend.models.file import FileRecord
+from backend.models.employee import EmployeeMapping
+from backend.chatlog_integration import chatlog_client
 from backend.db import db
-from data_manager import data_manager
-from chatlog_processor import ChatLogProcessor
+from backend.data_manager import data_manager
+from backend.chatlog_processor import ChatLogProcessor
 
 # 创建蓝图
 sync_bp = Blueprint('sync', __name__, url_prefix='/api/v1/sync')

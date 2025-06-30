@@ -6,7 +6,9 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, and_, desc
 import logging
 from backend.db import db
-from models import FileRecord  # 添加 FileRecord 模型导入
+from backend.models.file import FileRecord  # 添加 FileRecord 模型导入
+from backend.models.project import Project
+from backend.models.employee import EmployeeMapping
 
 # 创建文件管理蓝图
 files_bp = Blueprint('files', __name__, url_prefix='/api/v1/files')

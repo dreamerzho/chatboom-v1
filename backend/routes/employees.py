@@ -9,11 +9,11 @@ import logging
 from backend.db import db
 
 # 导入统一数据管理器
-from data_manager import data_manager, DataManager
-from utils import APIResponse, ValidationHelper, PaginationHelper
-from models.employee import EmployeeMapping
-from models.workload import WorkloadRecord
-from models.risk_event import RiskEvent
+from backend.data_manager import data_manager, DataManager
+from backend.utils import APIResponse, ValidationHelper, PaginationHelper
+from backend.models.employee import EmployeeMapping
+from backend.models.workload import WorkloadRecord
+from backend.models.risk_event import RiskEvent
 import io
 import pandas as pd
 from werkzeug.utils import secure_filename

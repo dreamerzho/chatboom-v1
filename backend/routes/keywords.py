@@ -7,11 +7,11 @@ import logging
 import json
 from typing import Dict, List, Any
 
-from models.keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKeyword
-from models.chat import ChatMessage
-from models.employee import EmployeeMapping
-from models.project import Project
-from keyword_analyzer import KeywordAnalyzer
+from backend.models.keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKeyword
+from backend.models.chat import ChatMessage
+from backend.models.employee import EmployeeMapping
+from backend.models.project import Project
+from backend.keyword_analyzer import KeywordAnalyzer
 from backend.db import db
 
 # 创建蓝图

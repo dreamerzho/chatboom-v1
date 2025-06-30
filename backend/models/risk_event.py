@@ -24,7 +24,7 @@ class RiskEvent(db.Model):
     attribution = db.Column(db.String(32))  # 归因标签（如项目难度预警/技能错配等）
 
     # 关联关系
-    project = db.relationship('Project', back_populates='risk_events')
+    project = db.relationship('Project', back_populates='risk_events', passive_deletes=True)
     employee = db.relationship('EmployeeMapping', back_populates='risk_events')
 
     def to_dict(self):

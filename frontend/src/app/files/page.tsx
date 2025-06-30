@@ -26,7 +26,7 @@ import {
   ExclamationCircleOutlined 
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
-import { fileAPI } from '../../lib/api';
+import { fileAPI } from '@lib/api';
 
 const { Title } = Typography;
 

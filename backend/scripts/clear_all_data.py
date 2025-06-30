@@ -4,14 +4,14 @@
 
 from app import create_app
 from backend.db import db
-from models.project import Project, ProjectChatroom
-from models.chat import ChatMessage
-from models.file import FileRecord
-from models.asset import Asset
-from models.workload import WorkloadRecord
-from models.project_health import ProjectHealthStats, ProjectDifficultyIndex
-from models.risk_event import RiskEvent
-from models.unmatched_person import UnmatchedPerson
+from backend.models.project import Project, ProjectChatroom
+from backend.models.chat import ChatMessage
+from backend.models.file import FileRecord
+from backend.models.asset import Asset
+from backend.models.workload import WorkloadRecord
+from backend.models.project_health import ProjectHealthStats, ProjectDifficultyIndex
+from backend.models.risk_event import RiskEvent
+from backend.models.unmatched_person import UnmatchedPerson
 
 app = create_app()
 

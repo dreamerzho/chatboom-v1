@@ -39,7 +39,7 @@ import {
   CloseOutlined,
   InfoCircleOutlined
 } from '@ant-design/icons';
-import { projectAPI, syncAPI, employeeAPI } from '../../lib/api';
+import { projectAPI, syncAPI, employeeAPI } from '@lib/api';
 import dayjs from 'dayjs';
 import Link from 'next/link';
 

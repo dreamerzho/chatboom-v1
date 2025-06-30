@@ -9,7 +9,7 @@ import { Card, Row, Col, Typography, Table, Tag, Button, Breadcrumb } from 'antd
 import { ArrowLeftOutlined, HomeOutlined } from '@ant-design/icons';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { projectAPI } from '../../../lib/api';
+import { projectAPI } from '@lib/api';
 
 const { Title, Text } = Typography;
 

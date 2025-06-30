@@ -62,7 +62,7 @@ class Asset(db.Model):
     
     # --- 关系定义 ---
     author = db.relationship('EmployeeMapping', backref='assets')
-    project = db.relationship('Project', backref='assets')
+    project = db.relationship('Project', backref=db.backref('assets', passive_deletes=True))
     parent_asset = db.relationship('Asset', remote_side=[id], backref='child_versions')
     
     def to_dict(self):

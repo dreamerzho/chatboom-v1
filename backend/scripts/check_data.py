@@ -6,17 +6,17 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from flask import Flask
-from config import Config
+from backend.config import Config
 from backend.db import db
-from models.chat import ChatMessage
-from models.file import FileRecord
-from models.project import Project
-from models.employee import EmployeeMapping
-from file_validator import FileNameValidator
+from backend.models.chat import ChatMessage
+from backend.models.file import FileRecord
+from backend.models.project import Project
+from backend.models.employee import EmployeeMapping
+from backend.file_validator import FileNameValidator
 from sqlalchemy import func
 from collections import defaultdict
-from models.asset import Asset
-from analysis_service import AnalysisService
+from backend.models.asset import Asset
+from backend.analysis_service import AnalysisService
 import hashlib
 import re
 

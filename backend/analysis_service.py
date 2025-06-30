@@ -9,11 +9,11 @@ from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import joinedload
 
 from backend.db import db
-from models.asset import Asset, AssetAnalysis
-from models.employee import EmployeeMapping
-from models.project import Project
-from parser_service import ParserService
-from models import AnalysisConfig
+from backend.models.asset import Asset, AssetAnalysis
+from backend.models.employee import EmployeeMapping
+from backend.models.project import Project
+from backend.parser_service import ParserService
+from backend.models import AnalysisConfig
 
 class AnalysisService:
     """

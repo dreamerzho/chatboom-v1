@@ -33,7 +33,7 @@ def check_dependencies():
 def check_database_connection():
     """检查数据库连接"""
     try:
-        from config import Config
+        from backend.config import Config
         print(f"数据库URI: {Config.SQLALCHEMY_DATABASE_URI}")
         
         import psycopg2

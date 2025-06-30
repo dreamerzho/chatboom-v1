@@ -259,8 +259,8 @@ export const projectAPI = {
   },
 
   // 获取项目详情
-  getProjectDetail: (id: string | number) =>
-    apiRequest(`/api/v1/projects/${id}`),
+  getProjectDetail: (id: string | number, period: string = '7d') =>
+    apiRequest(`/api/v1/projects/${id}?period=${period}`),
 
   // 获取项目文件列表
   getProjectFiles: (projectName: string) =>

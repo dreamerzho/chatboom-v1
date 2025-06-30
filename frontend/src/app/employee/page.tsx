@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { employeeAPI } from '../../lib/api';
+import { employeeAPI } from '@lib/api';
 
 // 定义员工详情类型
 interface EmployeeDetail {

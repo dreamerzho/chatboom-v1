@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from backend.app import app
 from backend.db import db
-from config import Config
-from chatlog_integration import chatlog_client
+from backend.config import Config
+from backend.chatlog_integration import chatlog_client
 import json
 from datetime import datetime
 import hashlib

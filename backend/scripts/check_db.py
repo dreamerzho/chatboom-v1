@@ -2,7 +2,7 @@
 # 用于查看数据库中的项目数据
 
 from app import create_app
-from models import Project, ProjectChatroom
+from backend.models import Project, ProjectChatroom
 from backend.db import db
 
 def check_projects():

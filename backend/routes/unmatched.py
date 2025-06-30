@@ -2,8 +2,8 @@
 # 支持分配角色时自动归集到员工表
 
 from flask import Blueprint, request, jsonify
-from models.unmatched_person import UnmatchedPerson
-from models.employee import EmployeeMapping
+from backend.models.unmatched_person import UnmatchedPerson
+from backend.models.employee import EmployeeMapping
 from backend.db import db
 from datetime import datetime
 

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Statistic, Button, Typography, Space, Spin, Alert } from 'antd';
 import { UserOutlined, ProjectOutlined, FileOutlined, MessageOutlined, ReloadOutlined } from '@ant-design/icons';
 import Link from 'next/link';
-import { employeeAPI, projectAPI, fileAPI } from '../lib/api';
+import { employeeAPI, projectAPI, fileAPI } from '@lib/api';
 
 const { Title, Paragraph, Text } = Typography;
 

@@ -4,7 +4,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Row,
@@ -16,6 +16,7 @@ import {
   Tooltip,
   Space,
   Empty,
+  Select,
 } from 'antd';
 import {
   InfoCircleOutlined,
@@ -29,9 +30,14 @@ import {
   PieChart,
   Pie,
   Cell,
+  LineChart,
+  XAxis,
+  YAxis,
+  Line,
+  Legend,
 } from 'recharts';
 import { useParams, useRouter } from 'next/navigation';
-import { projectAPI } from '../../../lib/api';
+import { projectAPI } from '@lib/api';
 
 const { Title, Text } = Typography;
 
@@ -98,6 +104,29 @@ interface ProjectDetail {
   risks?: { event_type: string; description: string; event_time: string }[];
 }
 
+// 适配 weData，兼容后端多种结构
+const adaptWeData = (raw: any[] | undefined): Array<{ name: string; value: number; color: string }> => {
+  if (!raw || raw.length === 0) return [];
+  if ('name' in raw[0] && 'value' in raw[0] && 'color' in raw[0]) return raw as any;
+  if ('we' in raw[0] && 'author' in raw[0]) {
+    const colorList = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#8dd1e1', '#a4de6c'];
+    const group: Record<string, { name: string; value: number; color: string }> = {};
+    raw.forEach((item, idx) => {
+      const key = item.author || '未知';
+      if (!group[key]) {
+        group[key] = {
+          name: key,
+          value: 0,
+          color: colorList[idx % colorList.length]
+        };
+      }
+      group[key].value += item.we || 0;
+    });
+    return Object.values(group);
+  }
+  return [];
+};
+
 const ProjectDetailPage: React.FC = () => {
   const params = useParams() as { id: string };
   const router = useRouter();
@@ -105,26 +134,45 @@ const ProjectDetailPage: React.FC = () => {
   // 项目信息、文件列表、加载状态
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [files, setFiles] = useState<FileRecord[]>([]);
+  const [healthTrendData, setHealthTrendData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isContextModalVisible, setIsContextModalVisible] = useState(false);
   const [currentFileContext, setCurrentFileContext] = useState<FileRecord | null>(null);
+  // 新增周期状态
+  const [period, setPeriod] = useState<'7d' | '30d'>('7d');
 
   // 2. useEffect 拉取项目详情和文件列表
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     setError(null);
-    // 获取项目详情
-    projectAPI.getProjectDetail(id)
-      .then((res: { success: boolean; data?: ProjectDetail; error?: string }) => {
-        if (res.success && res.data) {
-          setProject(res.data);
-          // 获取文件列表
-          return projectAPI.getProjectFiles(res.data.project_name);
+    // 并发请求项目详情和健康趋势，带period参数
+    Promise.all([
+      projectAPI.getProjectDetail(id, period),
+      fetch(`/api/v1/projects/${id}/health-stats?period=${period}`).then(res => res.json())
+    ])
+      .then(([detailRes, healthRes]) => {
+        if (detailRes.success && detailRes.data) {
+          setProject(detailRes.data);
         } else {
-          throw new Error(res.error || '未获取到项目信息');
+          throw new Error(detailRes.error || '未获取到项目信息');
         }
+        // 处理健康趋势数据
+        if (Array.isArray(healthRes)) {
+          const trend = healthRes.reverse().map((item, idx) => ({
+            week: `Week ${idx + 1}`,
+            health_score: item.health_score,
+            risk_count: item.risk_count || 0,
+            rework_count: item.warning_count || 0
+          }));
+          setHealthTrendData(trend);
+        } else {
+          setHealthTrendData([]);
+        }
+      })
+      .then(() => {
+        return projectAPI.getProjectFiles(project?.project_name || '');
       })
       .then((res?: { success: boolean; data?: { items: FileRecord[] }; error?: string }) => {
         if (res && res.success && res.data && Array.isArray(res.data.items)) {
@@ -137,7 +185,7 @@ const ProjectDetailPage: React.FC = () => {
         setError(e.message || '加载失败');
       })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, period]);
 
   // 3. 渲染逻辑：全部用API返回数据
   if (loading) return <div style={{padding: 32}}>加载中...</div>;
@@ -165,17 +213,27 @@ const ProjectDetailPage: React.FC = () => {
         <Row justify="space-between" align="middle">
           <Col>
             <Title level={2} style={{ margin: 0 }}>
-              {project.project_name} (ID: {project.id})
+              {project?.project_name} (ID: {project?.id})
             </Title>
           </Col>
           <Col>
             <Space size="large">
-              <Tooltip title={project.health?.reason || ''}>
+              <Tooltip title={project?.health?.reason || ''}>
                 <Badge
-                  status={getHealthBadge(project.health?.status || '').status as any}
-                  text={getHealthBadge(project.health?.status || '').text}
+                  status={getHealthBadge(project?.health?.status || '').status as any}
+                  text={getHealthBadge(project?.health?.status || '').text}
                 />
               </Tooltip>
+              {/* 周期选择下拉框 */}
+              <Select
+                value={period}
+                style={{ width: 100 }}
+                onChange={setPeriod}
+                options={[
+                  { value: '7d', label: '周' },
+                  { value: '30d', label: '月' }
+                ]}
+              />
               <Button icon={<SyncOutlined />}>同步数据</Button>
               <Button type="primary" icon={<FileTextOutlined />} onClick={handleGenerateReport}>生成报告</Button>
             </Space>
@@ -204,7 +262,7 @@ const ProjectDetailPage: React.FC = () => {
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
-                    data={project.weData}
+                    data={adaptWeData(project.weData)}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
@@ -214,7 +272,7 @@ const ProjectDetailPage: React.FC = () => {
                     dataKey="value"
                     label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                   >
-                    {(project.weData as Array<{ name: string; value: number; color: string }>).map((entry, index) => (
+                    {(adaptWeData(project.weData) as Array<{ name: string; value: number; color: string }>).map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
@@ -228,10 +286,16 @@ const ProjectDetailPage: React.FC = () => {
         {/* 健康趋势卡片 */}
         <Col xs={24} lg={12}>
           <Card title="健康趋势">
-            {/* 健康趋势折线图 */}
-            {project.healthTrendData && project.healthTrendData.length > 0 ? (
+            {healthTrendData && healthTrendData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <div>TODO: 健康趋势折线图</div>
+                <LineChart data={healthTrendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                  <XAxis dataKey="week" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="rework_count" name="返工文件数" stroke="#ff7300" />
+                  <Line type="monotone" dataKey="risk_count" name="风险事件数" stroke="#387908" />
+                </LineChart>
               </ResponsiveContainer>
             ) : (
               <Empty description="暂无健康趋势数据" />

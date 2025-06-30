@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from urllib.parse import quote
-from chatlog_processor import ChatLogProcessor
+# from backend.chatlog_processor import ChatLogProcessor  # 移除顶部导入，避免循环依赖
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -338,6 +338,7 @@ class ChatlogIntegration:
             
         try:
             # 动态创建与项目绑定的处理器实例
+            # from backend.chatlog_processor import ChatLogProcessor  # 在需要用到 ChatLogProcessor 的方法内部再进行延迟导入（如有实际用到的地方）
             processor = ChatLogProcessor(project_id=project_id, yield_log=capture_log)
             
             # 执行核心处理逻辑

@@ -7,8 +7,8 @@ from sqlalchemy import func, and_, desc
 import logging
 import requests
 # from config import CHATLOG_BASE_URL, CHATLOG_API_KEY # 移除直接导入
-from db import db
-from models import ChatMessage, EmployeeMapping
+from backend.db import db
+from backend.models import ChatMessage, EmployeeMapping
 
 # 创建聊天记录蓝图
 chatlog_bp = Blueprint('chatlog', __name__, url_prefix='/api/v1/chatlog')

@@ -32,9 +32,9 @@ class WorkloadRecord(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # 关联关系
-    employee = db.relationship('EmployeeMapping', backref='workload_records')
-    project = db.relationship('Project', backref='workload_records')
-    file_record = db.relationship('FileRecord', backref='workload_records')
+    employee = db.relationship('EmployeeMapping', backref=db.backref('workload_records', passive_deletes=True))
+    project = db.relationship('Project', backref=db.backref('workload_records', passive_deletes=True))
+    file_record = db.relationship('FileRecord', backref=db.backref('workload_records', passive_deletes=True))
     
     def to_dict(self):
         """转换为字典格式，用于API响应"""

@@ -3,8 +3,8 @@
 
 import re
 from typing import Optional, Dict, List
-from models.project import Project, ProjectChatroom
-from models.employee import EmployeeMapping
+from backend.models.project import Project, ProjectChatroom
+from backend.models.employee import EmployeeMapping
 from backend.db import db
 
 class Normalizer:

@@ -11,7 +11,8 @@ from datetime import datetime
 import logging
 # from config import SQLALCHEMY_DATABASE_URI # 移除直接导入，通过 app.config 访问
 from backend.db import db
-from config import Config
+from backend.config import Config
+from backend.file_validator import FileNameValidator
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -26,12 +27,12 @@ def create_app():
     db.init_app(app) # 初始化 db
 
     # 注册蓝图
-    from models import EmployeeMapping, Project, FileRecord, ChatMessage, ProjectChatroom, KeywordCategory
+    from backend.models import EmployeeMapping, Project, FileRecord, ChatMessage, ProjectChatroom, KeywordCategory
 
     # 导入API路由蓝图
-    from routes import employees_bp, projects_bp, files_bp, dashboard_bp, chatlog_bp, sync_bp, keywords_bp
-    from routes.unmatched import unmatched_bp
-    from routes.workload import workload_bp
+    from backend.routes import employees_bp, projects_bp, files_bp, dashboard_bp, chatlog_bp, sync_bp, keywords_bp
+    from backend.routes.unmatched import unmatched_bp
+    from backend.routes.workload import workload_bp
     app.register_blueprint(employees_bp)
     app.register_blueprint(projects_bp)
     app.register_blueprint(files_bp)
@@ -76,7 +77,6 @@ def create_app():
             请求体: JSON格式，包含 filename 字段
         返回: 验证结果
         """
-        from file_validator import FileNameValidator
             
         try:
             data = request.get_json()
@@ -107,7 +107,6 @@ def create_app():
             请求体: JSON格式，包含 filenames 数组
         返回: 批量验证结果
         """
-        from file_validator import FileNameValidator
             
         try:
             data = request.get_json()
@@ -145,7 +144,6 @@ def create_app():
             请求体: multipart/form-data，包含文件和其他元数据
         返回: 上传和验证结果
         """
-        from file_validator import FileNameValidator
         from werkzeug.utils import secure_filename
         import os
             

@@ -26,7 +26,7 @@ import {
   ExclamationCircleOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
-import { dashboardAPI, chatlogAPI } from '../../lib/api';
+import { dashboardAPI, chatlogAPI } from '@lib/api';
 
 const { Title, Text, Paragraph } = Typography;
 
