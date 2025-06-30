@@ -6,12 +6,14 @@ from datetime import datetime, timedelta
 import logging
 from sqlalchemy import func, and_
 from backend.db import db
-from models import Project, ProjectChatroom, ChatMessage, FileRecord, EmployeeMapping
-from models.workload import WorkloadRecord
-from models.project_health import ProjectHealthStats
-from models.risk_event import RiskEvent
+from backend.models import Project, ProjectChatroom, ChatMessage, FileRecord, EmployeeMapping
+from backend.models.workload import WorkloadRecord
+from backend.models.project_health import ProjectHealthStats
+from backend.models.risk_event import RiskEvent
 from itertools import groupby
-from analysis_service import AnalysisService
+from backend.analysis_service import AnalysisService
+from backend.models.keyword import KeywordAnalysis
+from backend.models.asset import Asset
 
 # 创建蓝图
 projects_bp = Blueprint('projects', __name__, url_prefix='/api/v1/projects')
@@ -167,18 +169,29 @@ def get_project(project_id):
                 'created_at': c.created_at.isoformat() if c.created_at else None
             } for c in chatrooms
         ]
-        # 自动聚合weData
+        # 自动聚合weData，直接用workload_records表
         records = WorkloadRecord.query.filter_by(project_id=project.id).all()
         color_list = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#8dd1e1', '#a4de6c']
         employee_map = {e.id: e.real_name for e in EmployeeMapping.query.all()}
         we_data = []
-        for idx, (emp_id, group) in enumerate(groupby(sorted(records, key=lambda r: r.employee_id), key=lambda r: r.employee_id)):
-            total_we = sum(r.we_value for r in group)
-            we_data.append({
-                'name': employee_map.get(emp_id, '未知'),
-                'value': total_we,
-                'color': color_list[idx % len(color_list)]
-            })
+        if records:
+            for idx, (emp_id, group) in enumerate(groupby(sorted(records, key=lambda r: r.employee_id), key=lambda r: r.employee_id)):
+                total_we = sum(r.we_value or 0 for r in group)
+                we_data.append({
+                    'name': employee_map.get(emp_id, f'员工{emp_id}'),
+                    'value': total_we,
+                    'color': color_list[idx % len(color_list)]
+                })
+        # 如果聚合后we_data为空，直接输出原始记录以便前端调试
+        if not we_data:
+            we_data = [
+                {
+                    'name': employee_map.get(r.employee_id, f'员工{r.employee_id}'),
+                    'value': r.we_value or 0,
+                    'color': color_list[i % len(color_list)]
+                } for i, r in enumerate(records)
+            ]
+        print('DEBUG weData:', we_data)
         # ========== 新增：项目统计卡片数据 ==========
         # 统计项目相关的文件
         total_files = FileRecord.query.filter_by(project_id=project.id).count()
@@ -192,15 +205,15 @@ def get_project(project_id):
         employee_ids = set([r.employee_id for r in records])
         employees = [employee_map.get(eid, '未知') for eid in employee_ids]
         # ========== 新增：健康分、风险、关键词分析 ==========
-        # 健康分
-        health_stat = ProjectHealthStats.query.filter_by(project_id=project.id).order_by(ProjectHealthStats.created_at.desc()).first()
-        health_score = health_stat.health_score if health_stat else None
-        risk_level = get_risk_level(health_score)
+        # 健康分（统一新版逻辑）
+        service = AnalysisService()
+        health = service.calculate_project_health_score(project_id)
+        health_score = health.get('health_score') if health else None
+        risk_level = health.get('risk_level') if health else None
         # 风险事件
         recent_risks = RiskEvent.query.filter_by(project_id=project.id).order_by(RiskEvent.event_time.desc()).limit(5).all()
         risks = [r.to_dict() for r in recent_risks]
         # 关键词分析（如有关键词分析表/服务，可补充）
-        from models.keyword import KeywordAnalysis
         keyword_analysis = KeywordAnalysis.query.filter_by(project_id=project.id).order_by(KeywordAnalysis.created_at.desc()).first()
         keywords = {}
         if keyword_analysis:
@@ -247,42 +260,21 @@ def get_project(project_id):
             'external_chat_groups': external_chat_groups,
             'weData': we_data,  # 员工WE分布
             'stats': {  # 项目统计卡片
-                'total_we': sum([w['value'] for w in we_data]),
+                'total_we': sum([w.get('value', w.get('we', 0)) for w in we_data]),
                 'total_files': total_files,
                 'total_messages': total_messages,
                 'compliant_files': compliant_files,
                 'compliance_rate': compliance_rate,
                 'employees': employees
             },
-            'health': {
-                'health_score': health_score,
-                'risk_level': risk_level
-            },
+            'health': health,  # 直接返回新版health字典
             'risks': risks,  # 近期风险事件
             'keywords': keywords,  # 关键词分析
             'recent_activities': recent_activities  # 近期动态
         }
-        # 统计数据
-        service = AnalysisService()
-        health = service.calculate_project_health_score(project_id)
-        # 获取项目所有资产的WE分布
-        def get_we_data(project_id):
-            from models.asset import Asset
-            assets = Asset.query.filter_by(project_id=project_id).all()
-            return [{'id': a.id, 'we': a.workload_equivalent or 0, 'author': a.author_id, 'date': a.submission_date.isoformat() if a.submission_date else ''} for a in assets]
-        we_data = get_we_data(project_id)
-        # 在返回的data中补充：
-        project_data['health'] = health
-        project_data['weData'] = we_data
-        if health:
-            project_data['health_score'] = health.get('health_score')
-            project_data['total_we'] = health.get('total_we')
-        else:
-            project_data['health_score'] = None
-            project_data['total_we'] = 0
         # ========== 组装metrics核心指标 ===========
         # 1. 总WE投入
-        total_we = sum([w['value'] for w in we_data])
+        total_we = sum([w.get('value', w.get('we', 0)) for w in we_data])
         # 2. 文件相关统计
         total_files = FileRecord.query.filter_by(project_id=project.id).count()
         compliant_files = FileRecord.query.filter_by(project_id=project.id, status='compliant').count()
@@ -342,10 +334,7 @@ def get_project(project_id):
             }
         ]
         project_data['metrics'] = metrics
-        return jsonify({
-            'success': True,
-            'data': project_data
-        })
+        return jsonify({'success': True, 'data': project_data})
     except Exception as e:
         logger.error(f"获取项目详情失败: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -689,9 +678,9 @@ def get_project_risk_events(project_id):
 def get_project_health(project_id):
     """返回指定项目的健康度统计"""
     service = AnalysisService()
-    result = service.calculate_project_health_score(project_id)
-    if result:
-        return jsonify({'success': True, 'data': result})
+    health = service.calculate_project_health_score(project_id)
+    if health:
+        return jsonify({'success': True, 'data': health})
     else:
         return jsonify({'success': False, 'error': '项目不存在或无健康度数据'}), 404
 
