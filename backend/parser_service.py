@@ -5,8 +5,8 @@
 import re
 import json
 from datetime import datetime, date
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass
+from typing import Optional, Dict, Any, List, Union
+from dataclasses import dataclass, field
 
 @dataclass
 class ParsedAssetData:
@@ -14,16 +14,20 @@ class ParsedAssetData:
     解析后的资产数据结构
     用于存储从文件名中提取的所有元数据
     """
-    submission_date: date  # 提交日期
-    task_identifier: str  # 任务标识符
-    author_abbreviation: str  # 作者缩写
-    version: int  # 版本号
-    workload_amount: Optional[str] = None  # 工作量描述
-    project_name: Optional[str] = None  # 项目名称
-    work_order: Optional[str] = None  # 工单名/内容描述
-    file_extension: Optional[str] = None  # 文件扩展名
-    is_compliant: bool = True  # 是否符合命名规范
-    parse_errors: List[str] = None  # 解析错误信息
+    submission_date: Optional[date] = None
+    task_identifier: str = ''
+    author_abbreviation: str = ''
+    version: int = 1
+    workload_amount: Optional[str] = None
+    project_name: Optional[str] = None
+    work_order: Optional[str] = None
+    file_extension: Optional[str] = None
+    is_compliant: bool = True
+    is_valid: bool = True
+    is_original: bool = True
+    is_reference: bool = False
+    parse_errors: List[str] = field(default_factory=list)
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 class ParserService:
     """
@@ -54,100 +58,144 @@ class ParserService:
             '条': 0.5,  # 1条 = 0.5个页面
         }
     
-    def parse(self, filename: str) -> Optional[ParsedAssetData]:
+    def parse(self, filename: str, file_record: Optional[Dict[str, Any]] = None) -> ParsedAssetData:
         """
-        解析文件名，提取结构化元数据
-        
+        解析文件名，提取结构化元数据，支持兜底和多源融合
         Args:
             filename: 原始文件名
-            
+            file_record: 可选，file_record的dict信息用于兜底补全
         Returns:
-            ParsedAssetData: 解析后的数据，如果解析失败返回None
+            ParsedAssetData: 解析后的数据，所有字段允许为None或空字符串
         """
         parse_errors = []
-        
-        # 预处理：去除首尾空格，统一分隔符
-        filename = filename.strip().replace(" ", "-").replace("_", "-")
-        
-        # 尝试主要命名规范
-        match = self.primary_pattern.match(filename)
+        is_compliant = True
+        is_valid = True
+        is_original = True
+        is_reference = False
+        # 预处理
+        if not filename or not isinstance(filename, str):
+            parse_errors.append('文件名为空或类型错误')
+            is_compliant = False
+            is_valid = False
+            filename = ''
+        norm_filename = filename.strip().replace(" ", "-").replace("_", "-")
+        # 正则匹配
+        match = self.primary_pattern.match(norm_filename) if filename else None
+        if not match:
+            for pattern in self.alternative_patterns:
+                match = pattern.match(norm_filename)
+                if match:
+                    break
         if match:
-            return self._extract_data_from_match(match, parse_errors)
-        
-        # 尝试备用命名规范
-        for pattern in self.alternative_patterns:
-            match = pattern.match(filename)
-            if match:
-                return self._extract_data_from_match(match, parse_errors)
-        
-        # 如果所有模式都不匹配，记录错误并返回None
-        parse_errors.append(f"文件名 '{filename}' 不符合命名规范")
-        return None
-    
-    def _extract_data_from_match(self, match: re.Match, parse_errors: List[str]) -> ParsedAssetData:
-        """
-        从正则匹配结果中提取数据
-        
-        Args:
-            match: 正则表达式匹配结果
-            parse_errors: 错误信息列表
-            
-        Returns:
-            ParsedAssetData: 解析后的数据
-        """
-        groups = match.groupdict()
-        
-        try:
-            # 解析日期
-            date_str = groups.get('date', '')
-            submission_date = self._parse_date(date_str)
-            if not submission_date:
-                parse_errors.append(f"无法解析日期: {date_str}")
-                return None
-            
-            # 解析版本号
-            version_str = groups.get('version', 'V1')
-            version = self._parse_version(version_str)
-            
-            # 构建任务标识符
-            project = self._normalize_text(groups.get('project', '').strip())
-            desc = self._normalize_text(groups.get('desc', '').strip())
+            try:
+                groups = match.groupdict()
+                # 日期
+                date_str = groups.get('date', '')
+                submission_date = self._parse_date(date_str)
+                if not submission_date:
+                    parse_errors.append(f"无法解析日期: {date_str}")
+                # 版本
+                version_str = groups.get('version', 'V1')
+                version = self._parse_version(version_str)
+                # 项目/任务
+                project = self._normalize_text(groups.get('project', '').strip())
+                desc = self._normalize_text(groups.get('desc', '').strip())
+                task_identifier = f"{project}-{desc}" if project and desc else desc
+                # 工作量
+                workload_amount = groups.get('workload')
+                if workload_amount:
+                    workload_amount = self._normalize_workload(workload_amount)
+                # 作者缩写
+                author_abbreviation = self._normalize_text(groups.get('author', '').strip()).upper()
+                # 文件类型
+                ext = groups.get('ext', '').lower()
+                fname = match.string.lower()
+                if ext in ['zip', 'rar', '7z']:
+                    for t in ['psd', 'png', 'jpg', 'jpeg', 'ai']:
+                        if t in fname:
+                            ext = t
+                            break
+                # 参考/原创判定
+                if any(k in fname for k in ['参考', '素材']):
+                    is_reference = True
+                    is_original = False
+                elif not version_str:
+                    is_original = True
+                return ParsedAssetData(
+                    submission_date=submission_date,
+                    task_identifier=task_identifier,
+                    author_abbreviation=author_abbreviation,
+                    version=version,
+                    workload_amount=workload_amount,
+                    project_name=project,
+                    work_order=desc,
+                    file_extension=ext,
+                    is_compliant=True,
+                    is_valid=is_valid and not parse_errors,
+                    is_original=is_original,
+                    is_reference=is_reference,
+                    parse_errors=parse_errors
+                )
+            except Exception as e:
+                parse_errors.append(f"解析过程中发生错误: {str(e)}")
+                is_compliant = False
+                is_valid = False
+        # --- 兜底：正则不匹配或解析失败 ---
+        # 多源融合补全
+        author_abbreviation = ''
+        ext = ''
+        submission_date = None
+        project = ''
+        desc = ''
+        workload_amount = None
+        version = 1
+        task_identifier = ''
+        if file_record:
+            # 作者缩写
+            author_abbreviation = (file_record.get('author_abbreviation') or '').upper()
+            # 文件类型
+            ext = (file_record.get('file_extension') or '').lower()
+            # 项目/任务
+            project = file_record.get('project_name') or ''
+            desc = file_record.get('work_order') or ''
             task_identifier = f"{project}-{desc}" if project and desc else desc
-            
-            # 解析工作量
-            workload_amount = groups.get('workload')
-            if workload_amount:
-                workload_amount = self._normalize_workload(workload_amount)
-            
-            # 归一化作者缩写
-            author_abbreviation = self._normalize_text(groups.get('author', '').strip()).upper()
-            
-            # 文件类型归类逻辑
-            ext = groups.get('ext', '').lower()
-            filename = match.string.lower()
-            # 如果是压缩包，优先检查文件名中是否有psd/png/jpg等关键词
-            if ext in ['zip', 'rar', '7z']:
-                for t in ['psd', 'png', 'jpg', 'jpeg', 'ai']:
-                    if t in filename:
-                        ext = t
-                        break
-            
-            return ParsedAssetData(
-                submission_date=submission_date,
-                task_identifier=task_identifier,
-                author_abbreviation=author_abbreviation,
-                version=version,
-                workload_amount=workload_amount,
-                project_name=project,
-                work_order=desc,
-                file_extension=ext,
-                is_compliant=True,
-                parse_errors=parse_errors
-            )
-            
-        except Exception as e:
-            parse_errors.append(f"解析过程中发生错误: {str(e)}")
-            return None
+            # 工作量
+            workload_amount = file_record.get('workload')
+            # 日期
+            upload_time = file_record.get('upload_time')
+            if upload_time:
+                try:
+                    if isinstance(upload_time, str):
+                        submission_date = datetime.fromisoformat(upload_time).date()
+                    else:
+                        submission_date = upload_time.date()
+                except Exception:
+                    parse_errors.append(f"无法解析upload_time: {upload_time}")
+            # 版本
+            version = 1
+            # 参考/原创判定
+            fname = filename.lower()
+            if any(k in fname for k in ['参考', '素材']):
+                is_reference = True
+                is_original = False
+        else:
+            parse_errors.append('未提供file_record，无法补全作者、类型等信息')
+        parse_errors.append(f"文件名 '{filename}' 不符合命名规范，已用file_record兜底")
+        return ParsedAssetData(
+            submission_date=submission_date,
+            task_identifier=task_identifier,
+            author_abbreviation=author_abbreviation,
+            version=version,
+            workload_amount=workload_amount,
+            project_name=project,
+            work_order=desc,
+            file_extension=ext,
+            is_compliant=False,
+            is_valid=False,
+            is_original=is_original,
+            is_reference=is_reference,
+            parse_errors=parse_errors
+        )
     
     def _parse_date(self, date_str: str) -> Optional[date]:
         """
