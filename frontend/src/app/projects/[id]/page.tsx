@@ -147,38 +147,30 @@ const ProjectDetailPage: React.FC = () => {
     if (!id) return;
     setLoading(true);
     setError(null);
-    // 并发请求项目详情和健康趋势，带period参数
-    Promise.all([
-      projectAPI.getProjectDetail(id, period),
-      fetch(`/api/v1/projects/${id}/health-stats?period=${period}`).then(res => res.json())
-    ])
-      .then(([detailRes, healthRes]) => {
-        if (detailRes.success && detailRes.data) {
-          setProject(detailRes.data);
+    // 只调用聚合接口
+    projectAPI.getProjectOverview(id, period)
+      .then((res) => {
+        if (res.success && res.data) {
+          const overview = res.data as any; // 后端返回的overview结构
+          // === 自动修正核心指标栏和健康分 ===
+          if (overview.healthStats && overview.healthStats.length > 0) {
+            const stats = overview.healthStats[0];
+            overview.project.metrics = [
+              { title: '健康分', value: stats.health_score, unit: '', formula: '多维度综合打分' },
+              { title: '负面情绪率', value: stats.negative_sentiment_rate, unit: '', formula: '负面消息占比' },
+              { title: '返工数', value: stats.warning_count, unit: '', formula: '返工文件数' },
+              { title: '风险数', value: stats.risk_count, unit: '', formula: '风险事件数' }
+            ];
+            overview.project.health = {
+              status: stats.health_score >= 90 ? 'good' : stats.health_score >= 70 ? 'warning' : 'danger',
+              reason: `健康分：${stats.health_score}`
+            };
+          }
+          setProject(overview.project as ProjectDetail);
+          setHealthTrendData(overview.healthStats || []);
+          // 文件列表如需可后续补充
         } else {
-          throw new Error(detailRes.error || '未获取到项目信息');
-        }
-        // 处理健康趋势数据
-        if (Array.isArray(healthRes)) {
-          const trend = healthRes.reverse().map((item, idx) => ({
-            week: `Week ${idx + 1}`,
-            health_score: item.health_score,
-            risk_count: item.risk_count || 0,
-            rework_count: item.warning_count || 0
-          }));
-          setHealthTrendData(trend);
-        } else {
-          setHealthTrendData([]);
-        }
-      })
-      .then(() => {
-        return projectAPI.getProjectFiles(project?.project_name || '');
-      })
-      .then((res?: { success: boolean; data?: { items: FileRecord[] }; error?: string }) => {
-        if (res && res.success && res.data && Array.isArray(res.data.items)) {
-          setFiles(res.data.items);
-        } else {
-          setFiles([]);
+          throw new Error(res.error || '未获取到项目信息');
         }
       })
       .catch((e: Error) => {
