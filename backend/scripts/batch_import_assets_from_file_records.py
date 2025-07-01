@@ -77,6 +77,8 @@ def batch_import_assets():
             continue
     session.commit()
     print(f"导入完成: 新增 {count} 条, 跳过已存在 {skip} 条, 错误 {error} 条")
+    # 新增：commit后立即查询assets表总数
+    print(f"assets表当前总数: {session.query(Asset).count()}")
 
 if __name__ == '__main__':
     app = Flask(__name__)
