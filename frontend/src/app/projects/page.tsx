@@ -532,49 +532,6 @@ function ProjectsPage() {
     fetchProjects();
   }, []);
 
-  // 1. 同步失败时日志区和抽屉顶部都显示明显错误提示
-  {syncResult === null && syncLog.some(log => log.includes('同步失败')) && (
-    <Alert
-      type="error"
-      showIcon
-      message="同步失败"
-      description="请检查网络或后端服务，详细错误见下方日志。"
-      style={{ marginBottom: 16 }}
-    />
-  )}
-
-  // 2. 同步成功后支持一键复制日志
-  {syncResult && (
-    <Button
-      style={{ marginBottom: 16 }}
-      onClick={() => {
-        navigator.clipboard.writeText(syncLog.join('\n'));
-        message.success('日志已复制到剪贴板');
-      }}
-    >
-      复制全部日志
-    </Button>
-  )}
-
-  // 1. 同步结果区支持导出为JSON
-  {syncResult && (
-    <Button
-      style={{ marginBottom: 16, marginLeft: 8 }}
-      onClick={() => {
-        const blob = new Blob([JSON.stringify(syncResult, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `sync_result_${syncResult.project_id || 'project'}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        message.success('同步结果已导出为JSON');
-      }}
-    >
-      导出同步结果(JSON)
-    </Button>
-  )}
-
   // 2. 同步完成后自动滚动到结果区
   useEffect(() => {
     if (syncResult && logEndRef.current) {

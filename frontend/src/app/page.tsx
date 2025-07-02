@@ -37,9 +37,9 @@ function Home() {
 
       // 构建统计数据
       const homeStats: HomeStats = {
-        total_employees: employeesRes.success ? employeesRes.data?.length || 0 : 0,
-        total_projects: projectsRes.success ? projectsRes.data?.length || 0 : 0,
-        total_files: filesRes.success ? filesRes.data?.length || 0 : 0,
+        total_employees: employeesRes.success && Array.isArray(employeesRes.data) ? employeesRes.data.length : 0,
+        total_projects: projectsRes.success && Array.isArray(projectsRes.data) ? projectsRes.data.length : 0,
+        total_files: filesRes.success && Array.isArray(filesRes.data) ? filesRes.data.length : 0,
         today_messages: 0 // 暂时设为0，后续可以从聊天API获取
       };
 

@@ -44,19 +44,20 @@ function EmployeePage() {
     }
     setLoading(true);
     employeeAPI.getEmployee(employeeId)
-      .then((res: { success: boolean; data?: any; error?: string }) => {
+      .then((res: { success: boolean; data?: unknown; error?: string }) => {
         if (res.success && res.data) {
+          const emp = res.data as EmployeeDetail;
           setEmployee({
-            id: res.data.id,
-            real_name: res.data.real_name,
-            position: res.data.position,
-            wechat_nickname: res.data.wechat_nickname,
-            name_abbreviation: res.data.name_abbreviation,
-            join_date: res.data.created_at || '',
-            total_messages: typeof res.data.total_messages === 'number' ? res.data.total_messages : 0,
-            total_files: typeof res.data.total_files === 'number' ? res.data.total_files : 0,
-            compliant_files: typeof res.data.compliant_files === 'number' ? res.data.compliant_files : 0,
-            recent_activities: Array.isArray(res.data.recent_activities) ? res.data.recent_activities : [],
+            id: emp.id,
+            real_name: emp.real_name,
+            position: emp.position,
+            wechat_nickname: emp.wechat_nickname,
+            name_abbreviation: emp.name_abbreviation,
+            join_date: emp.join_date,
+            total_messages: emp.total_messages,
+            total_files: emp.total_files,
+            compliant_files: emp.compliant_files,
+            recent_activities: emp.recent_activities,
           });
           setError(null);
         } else {

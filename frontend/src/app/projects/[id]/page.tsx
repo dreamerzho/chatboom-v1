@@ -4,7 +4,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   Row,
@@ -98,16 +98,16 @@ interface ProjectDetail {
   metrics?: Metric[];
   weData?: Array<{ name: string; value: number; color: string }>;
   health?: { status: string; reason: string };
-  healthTrendData?: any[];
+  healthTrendData?: { week: string; rework_count?: number; risk_count?: number; health_score?: number; negative_sentiment_rate?: number; warning_count?: number; }[];
   chatContext?: { sender: string; time: string; content: string }[];
   recent_activities?: { type: string; title: string; description: string; time: string }[];
   risks?: { event_type: string; description: string; event_time: string }[];
 }
 
 // 适配 weData，兼容后端多种结构
-const adaptWeData = (raw: any[] | undefined): Array<{ name: string; value: number; color: string }> => {
+const adaptWeData = (raw: Array<{ name?: string; value?: number; color?: string; we?: number; author?: string }> | undefined): Array<{ name: string; value: number; color: string }> => {
   if (!raw || raw.length === 0) return [];
-  if ('name' in raw[0] && 'value' in raw[0] && 'color' in raw[0]) return raw as any;
+  if ('name' in raw[0] && 'value' in raw[0] && 'color' in raw[0]) return raw as Array<{ name: string; value: number; color: string }>;
   if ('we' in raw[0] && 'author' in raw[0]) {
     const colorList = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#8dd1e1', '#a4de6c'];
     const group: Record<string, { name: string; value: number; color: string }> = {};
@@ -133,8 +133,8 @@ const ProjectDetailPage: React.FC = () => {
   const { id } = params;
   // 项目信息、文件列表、加载状态
   const [project, setProject] = useState<ProjectDetail | null>(null);
-  const [files, setFiles] = useState<FileRecord[]>([]);
-  const [healthTrendData, setHealthTrendData] = useState<any[]>([]);
+  const [files] = useState<FileRecord[]>([]);
+  const [healthTrendData, setHealthTrendData] = useState<{ week: string; rework_count: number; risk_count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isContextModalVisible, setIsContextModalVisible] = useState(false);
@@ -151,23 +151,27 @@ const ProjectDetailPage: React.FC = () => {
     projectAPI.getProjectOverview(id, period)
       .then((res) => {
         if (res.success && res.data) {
-          const overview = res.data as any; // 后端返回的overview结构
+          const overview = res.data as { project: ProjectDetail; healthStats: { week: string; rework_count?: number; risk_count?: number; health_score?: number; negative_sentiment_rate?: number; warning_count?: number; }[] };
           // === 自动修正核心指标栏和健康分 ===
           if (overview.healthStats && overview.healthStats.length > 0) {
             const stats = overview.healthStats[0];
             overview.project.metrics = [
-              { title: '健康分', value: stats.health_score, unit: '', formula: '多维度综合打分' },
-              { title: '负面情绪率', value: stats.negative_sentiment_rate, unit: '', formula: '负面消息占比' },
-              { title: '返工数', value: stats.warning_count, unit: '', formula: '返工文件数' },
-              { title: '风险数', value: stats.risk_count, unit: '', formula: '风险事件数' }
+              { title: '健康分', value: stats.health_score ?? 0, unit: '', formula: '多维度综合打分' },
+              { title: '负面情绪率', value: stats.negative_sentiment_rate ?? 0, unit: '', formula: '负面消息占比' },
+              { title: '返工数', value: stats.warning_count ?? 0, unit: '', formula: '返工文件数' },
+              { title: '风险数', value: stats.risk_count ?? 0, unit: '', formula: '风险事件数' }
             ];
             overview.project.health = {
-              status: stats.health_score >= 90 ? 'good' : stats.health_score >= 70 ? 'warning' : 'danger',
-              reason: `健康分：${stats.health_score}`
+              status: (stats.health_score ?? 0) >= 90 ? 'good' : (stats.health_score ?? 0) >= 70 ? 'warning' : 'danger',
+              reason: `健康分：${stats.health_score ?? 0}`
             };
           }
           setProject(overview.project as ProjectDetail);
-          setHealthTrendData(overview.healthStats || []);
+          setHealthTrendData((overview.healthStats || []).map(h => ({
+            week: h.week,
+            rework_count: h.rework_count ?? 0,
+            risk_count: h.risk_count ?? 0
+          })));
           // 文件列表如需可后续补充
         } else {
           throw new Error(res.error || '未获取到项目信息');
@@ -212,7 +216,7 @@ const ProjectDetailPage: React.FC = () => {
             <Space size="large">
               <Tooltip title={project?.health?.reason || ''}>
                 <Badge
-                  status={getHealthBadge(project?.health?.status || '').status as any}
+                  status={getHealthBadge(project?.health?.status || '').status as 'success' | 'warning' | 'error' | 'default'}
                   text={getHealthBadge(project?.health?.status || '').text}
                 />
               </Tooltip>

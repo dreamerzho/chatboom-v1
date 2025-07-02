@@ -13,21 +13,47 @@ import { projectAPI } from '@lib/api';
 
 const { Title, Text } = Typography;
 
+interface EmployeeStat {
+  id: string | number;
+  name: string;
+  position: string;
+  weScore: number;
+  files: number;
+  rework: number;
+  remark?: string;
+}
+
+interface FileStat {
+  id: string | number;
+  name: string;
+  finalVersion: string;
+  submitter: string;
+  reworkCount: number;
+  lastModified: string;
+}
+
+interface ProjectDetail {
+  project_name: string;
+  employee_stats: EmployeeStat[];
+  high_rework_files: FileStat[];
+}
+
 export default function ProjectReportPage() {
   const router = useRouter();
   const params = useParams();
   const projectId = params?.id;
-  const [project, setProject] = useState<any>(null);
+  const [project, setProject] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
-    projectAPI.getProjectDetail(projectId)
+    const id = Array.isArray(projectId) ? projectId[0] : projectId;
+    projectAPI.getProjectDetail(id)
       .then(res => {
         if (res.success && res.data) {
-          setProject(res.data);
+          setProject(res.data as ProjectDetail);
         } else {
           setError(res.error || '未找到项目详情');
         }
@@ -43,9 +69,9 @@ export default function ProjectReportPage() {
   const employeeColumns = [
     { title: '员工姓名', dataIndex: 'name', key: 'name', render: (text: string) => <Text strong>{text}</Text> },
     { title: '岗位', dataIndex: 'position', key: 'position' },
-    { title: 'WE分数', dataIndex: 'weScore', key: 'weScore', sorter: (a: any, b: any) => a.weScore - b.weScore, render: (score: number) => <Tag color="blue">{score.toFixed(1)}</Tag> },
-    { title: '提交文件数', dataIndex: 'files', key: 'files', sorter: (a: any, b: any) => a.files - b.files },
-    { title: '返工次数', dataIndex: 'rework', key: 'rework', sorter: (a: any, b: any) => a.rework - b.rework, render: (rework: number) => <Tag color={rework > 2 ? 'red' : 'default'}>{rework}</Tag> },
+    { title: 'WE分数', dataIndex: 'weScore', key: 'weScore', sorter: (a: EmployeeStat, b: EmployeeStat) => a.weScore - b.weScore, render: (score: number) => <Tag color="blue">{score.toFixed(1)}</Tag> },
+    { title: '提交文件数', dataIndex: 'files', key: 'files', sorter: (a: EmployeeStat, b: EmployeeStat) => a.files - b.files },
+    { title: '返工次数', dataIndex: 'rework', key: 'rework', sorter: (a: EmployeeStat, b: EmployeeStat) => a.rework - b.rework, render: (rework: number) => <Tag color={rework > 2 ? 'red' : 'default'}>{rework}</Tag> },
     { title: '备注', dataIndex: 'remark', key: 'remark' },
   ];
 
@@ -53,7 +79,7 @@ export default function ProjectReportPage() {
     { title: '文件名', dataIndex: 'name', key: 'name', render: (text: string) => <Text strong>{text}</Text> },
     { title: '最终版本', dataIndex: 'finalVersion', key: 'finalVersion', render: (v: string) => <Tag color="purple">{v}</Tag> },
     { title: '提交人', dataIndex: 'submitter', key: 'submitter' },
-    { title: '返工次数', dataIndex: 'reworkCount', key: 'reworkCount', sorter: (a: any, b: any) => a.reworkCount - b.reworkCount, render: (count: number) => <Tag color="red">{count}</Tag> },
+    { title: '返工次数', dataIndex: 'reworkCount', key: 'reworkCount', sorter: (a: FileStat, b: FileStat) => a.reworkCount - b.reworkCount, render: (count: number) => <Tag color="red">{count}</Tag> },
     { title: '最后修改时间', dataIndex: 'lastModified', key: 'lastModified' },
   ];
 
@@ -94,7 +120,7 @@ export default function ProjectReportPage() {
               dataSource={project.employee_stats}
               rowKey="id"
               pagination={false}
-              summary={pageData => {
+              summary={(pageData: readonly EmployeeStat[]) => {
                 let totalWeScore = 0;
                 pageData.forEach(({ weScore }) => {
                   totalWeScore += weScore;
@@ -113,7 +139,7 @@ export default function ProjectReportPage() {
             />
 
             {/* 高风险文件列表 */}
-            <Title level={4} style={{ marginTop: 40, marginBottom: 20 }}>高返工风险文件列表 (返工次数 > 3)</Title>
+            <Title level={4} style={{ marginTop: 40, marginBottom: 20 }}>高返工风险文件列表 (返工次数 {'>'} 3)</Title>
             <Table
               columns={fileColumns}
               dataSource={project.high_rework_files}

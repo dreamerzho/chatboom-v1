@@ -31,7 +31,6 @@ import {
   Tag,
   Tooltip,
   Upload,
-  UploadProps,
 } from 'antd';
 import {
   PlusOutlined,
@@ -138,6 +137,11 @@ const getRandomAvatar = (name: string) => {
   return `https://i.pravatar.cc/150?img=${avatarId}`;
 };
 
+// 新增：定义 EmployeeRow 类型
+interface EmployeeRow {
+  [key: string]: string | number | null | undefined;
+}
+
 // 页面主组件
 function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -157,10 +161,8 @@ function EmployeesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<any>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [importPreview, setImportPreview] = useState<any[]>([]);
-  const [importedRows, setImportedRows] = useState<any[]>([]); // 解析后的表格数据
+  const [importResult, setImportResult] = useState<EmployeeRow[] | null>(null);
+  const [importedRows, setImportedRows] = useState<EmployeeRow[]>([]); // 解析后的表格数据
   const [importStep, setImportStep] = useState<'select'|'preview'|'result'>('select');
 
   // --- 数据获取与处理 ---
@@ -526,15 +528,13 @@ function EmployeesPage() {
   const handleOpenImportModal = () => {
     setImportModalVisible(true);
     setImportResult(null);
-    setImportError(null);
-    setImportPreview([]);
+    setImportedRows([]);
   };
   // 新增：关闭批量导入弹窗
   const handleCloseImportModal = () => {
     setImportModalVisible(false);
     setImportResult(null);
-    setImportError(null);
-    setImportPreview([]);
+    setImportedRows([]);
   };
 
   // 处理文件上传
@@ -546,7 +546,7 @@ function EmployeesPage() {
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-      setImportedRows(jsonData);
+      setImportedRows(jsonData as EmployeeRow[]);
       setImportStep('preview');
     };
     reader.readAsArrayBuffer(file);
@@ -563,7 +563,7 @@ function EmployeesPage() {
     // 第一行为表头
     const headers = data[0];
     const jsonData = data.slice(1).map(row => {
-      const obj: any = {};
+      const obj: EmployeeRow = {};
       headers.forEach((h, i) => {
         obj[h.trim()] = row[i] ? row[i].trim() : '';
       });
@@ -574,13 +574,12 @@ function EmployeesPage() {
   };
 
   // --- 新增：确认导入逻辑 ---
-  const handleImportConfirm = async () => {
-    if (!importedRows || importedRows.length === 0) {
+  const handleImportConfirm = async (rows: EmployeeRow[]) => {
+    if (!rows || rows.length === 0) {
       message.error('没有可导入的数据');
       return;
     }
     setImporting(true);
-    setImportError(null);
     try {
       // 字段映射：英文表头转为后端要求的中文表头
       const fieldMap: Record<string, string> = {
@@ -590,11 +589,11 @@ function EmployeesPage() {
         name_abbr: '姓名缩写',
         name_abbreviation: '姓名缩写', // 兼容部分导入
       };
-      const mappedRows = importedRows.map((row: any) => {
+      const mappedRows = rows.map((row: EmployeeRow) => {
         const newRow: Record<string, string> = {};
         Object.keys(fieldMap).forEach(key => {
           if (row[key] !== undefined) {
-            newRow[fieldMap[key]] = row[key];
+            newRow[fieldMap[key]] = String(row[key] ?? '');
           }
         });
         // 保证所有字段都存在
@@ -616,11 +615,9 @@ function EmployeesPage() {
         setImportStep('result');
         fetchData(); // 刷新员工列表
       } else {
-        setImportError(result.error || '导入失败');
         message.error(result.error || '导入失败');
       }
-    } catch (e) {
-      setImportError('网络错误');
+    } catch {
       message.error('网络错误');
     }
     setImporting(false);
@@ -941,7 +938,7 @@ function EmployeesPage() {
                   {importedRows.map((row, idx) => (
                     <tr key={idx}>
                       {Object.values(row).map((val, i) => (
-                        <td key={i} style={{ border: '1px solid #eee', padding: 4 }}>{val}</td>
+                        <td key={i} style={{ border: '1px solid #eee', padding: 4 }}>{String(val)}</td>
                       ))}
                     </tr>
                   ))}
@@ -950,7 +947,7 @@ function EmployeesPage() {
             </div>
             <Space>
               <Button onClick={() => setImportStep('select')}>返回</Button>
-              <Button type="primary" onClick={handleImportConfirm} loading={importing}>
+              <Button type="primary" onClick={() => handleImportConfirm(importedRows)} loading={importing}>
                 确认导入
               </Button>
             </Space>
@@ -970,7 +967,7 @@ function EmployeesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {importResult && importResult.map((row: any, idx: number) => (
+                  {importResult && (importResult as Record<string, string>[]).map((row, idx: number) => (
                     <tr key={idx}>
                       <td>{row['微信昵称']}</td>
                       <td>{row['状态']}</td>

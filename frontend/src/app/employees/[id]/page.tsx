@@ -55,9 +55,9 @@ export default function EmployeeDetailPage() {
   const params = useParams();
   const { id } = params;
 
-  const [employee, setEmployee] = useState<EmployeeDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [employee] = useState<EmployeeDetails | null>(null);
 
   useEffect(() => {
     if (id) {

@@ -193,7 +193,7 @@ function DashboardPageV2() {
                       valueStyle={{ fontSize: 30, fontWeight: 600 }}
                       suffix="小时"
                     />
-                    <Text type="-">-0.05%</Text>
+                    <Text>-0.05%</Text>
                 </Col>
                 <Col span={12}>
                     <Line {...tinyLineConfig} />
@@ -216,8 +216,8 @@ function DashboardPageV2() {
           <Card bordered={false} title={<Title level={4}>实时风险流</Title>} style={{height: '100%'}}>
               <List
                 itemLayout="horizontal"
-                dataSource={[]}
-                renderItem={item => (
+                dataSource={[] as { type: string; description: string; time: string }[]}
+                renderItem={(item: { type: string; description: string; time: string }) => (
                   <List.Item>
                     <List.Item.Meta
                       avatar={riskIcons[item.type as keyof typeof riskIcons]}

@@ -204,20 +204,16 @@ export const employeeAPI = {
   // 获取员工列表
   getEmployees: async () => {
     // 后端使用了分页，但我们在这里请求所有数据
-    const res = await apiRequest<any>('/api/v1/employees/?per_page=1000'); 
-    
-    // 兼容新旧两种后端返回格式
+    const res = await apiRequest<{ items?: EmployeeMapping[]; data?: EmployeeMapping[] }>('/api/v1/employees/?per_page=1000'); 
+    // 兼容新老两种后端返回格式
     if (res.success && res.data) {
-      // 检查是否为分页格式
-      if (res.data.items && Array.isArray(res.data.items)) {
+      if (Array.isArray(res.data.items)) {
         return { ...res, data: res.data.items };
       }
-      // 兼容直接返回数组的旧格式
       if (Array.isArray(res.data)) {
         return { ...res, data: res.data };
       }
     }
-    // 如果数据格式不正确或请求失败，返回空数组
     return { ...res, data: [] };
   },
 
@@ -271,14 +267,14 @@ export const projectAPI = {
     apiRequest(`/api/v1/files/list?project_name=${encodeURIComponent(projectName)}`),
 
   // 添加新项目
-  addProject: (projectData: any) =>
+  addProject: (projectData: Partial<Project>) =>
     apiRequest('/api/v1/projects/', {
       method: 'POST',
       body: JSON.stringify(projectData),
     }),
 
   // 更新项目
-  updateProject: (id: number, projectData: any) =>
+  updateProject: (id: number, projectData: Partial<Project>) =>
     apiRequest(`/api/v1/projects/${id}`, {
       method: 'PUT',
       body: JSON.stringify(projectData),
