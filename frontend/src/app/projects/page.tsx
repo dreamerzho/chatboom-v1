@@ -750,6 +750,30 @@ function ProjectsPage() {
                         loading={syncingProjectId === project.id}
                       />
                     </Tooltip>
+                    {/* 新增归档/恢复按钮 */}
+                    {project.status === 'active' ? (
+                      <Tooltip title="归档项目">
+                        <Button
+                          icon={<CloseCircleOutlined />}
+                          onClick={async () => {
+                            await projectAPI.archiveProject(project.id);
+                            message.success('项目已归档');
+                            fetchProjects();
+                          }}
+                        >归档</Button>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title="恢复为执行中">
+                        <Button
+                          icon={<CheckCircleOutlined />}
+                          onClick={async () => {
+                            await projectAPI.restoreProject(project.id);
+                            message.success('项目已恢复为执行中');
+                            fetchProjects();
+                          }}
+                        >恢复</Button>
+                      </Tooltip>
+                    )}
                     <Link href={`/projects/${project.id}`} passHref>
                       <Button type="primary" icon={<EyeOutlined />}>
                         查看详情

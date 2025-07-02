@@ -289,6 +289,9 @@ export const projectAPI = {
     apiRequest(`/api/v1/projects/${id}`, {
       method: 'DELETE',
     }),
+
+  archiveProject: (id: number) => apiRequest(`/api/v1/projects/${id}/archive`, { method: 'POST' }),
+  restoreProject: (id: number) => apiRequest(`/api/v1/projects/${id}/restore`, { method: 'POST' }),
 };
 
 // 文件管理API
