@@ -22,6 +22,7 @@ class ProjectSummary(db.Model):
     positive_feedback_count = db.Column(db.Integer, default=0)  # 正向反馈数
     negative_feedback_count = db.Column(db.Integer, default=0)  # 负向反馈数
     last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # 更新时间
+    status = db.Column(db.String(32), default='active')  # 项目状态
 
     project = db.relationship('Project', backref=db.backref('summary', uselist=False, passive_deletes=True))
 
@@ -39,5 +40,6 @@ class ProjectSummary(db.Model):
             'risk_events_count': self.risk_events_count,
             'positive_feedback_count': self.positive_feedback_count,
             'negative_feedback_count': self.negative_feedback_count,
-            'last_updated': self.last_updated.isoformat() if self.last_updated else None
+            'last_updated': self.last_updated.isoformat() if self.last_updated else None,
+            'status': self.status
         } 

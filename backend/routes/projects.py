@@ -11,7 +11,7 @@ from backend.models.workload import WorkloadRecord
 from backend.models.project_health import ProjectHealthStats
 from backend.models.risk_event import RiskEvent
 from itertools import groupby
-from backend.analysis_service import AnalysisService
+from backend.analysis_service import AnalysisService, update_all_project_summaries
 from backend.models.keyword import KeywordAnalysis
 from backend.models.asset import Asset
 from backend.models.project_summary import ProjectSummary
@@ -32,10 +32,11 @@ def get_projects():
         project_list = []
         for s in summaries:
             d = s.to_dict()
-            # 兼容前端ProjectCard结构
+            # 兼容前端ProjectCard结构，补充status字段
             project_list.append({
                 'id': d['project_id'],
                 'project_name': d['project_name'],
+                'status': d.get('status', 'active'),
                 'total_files': d['total_files'],
                 'total_workload_we': d['total_workload_we'],
                 'health_score': d['health_score'],
@@ -59,9 +60,10 @@ def create_project():
     返回: 创建结果
     """
     try:
-        data = request.get_json()
-        logger.info(f"[create_project] 收到数据: {data}")
+        data = request.get_json(silent=True) or request.form.to_dict() or {}
+        logger.info(f"[create_project] 收到原始数据: {data}, 类型: {type(data)}")
         if not data:
+            logger.error(f"[create_project] data为空，request.data={request.data}, request.form={request.form}, request.content_type={request.content_type}")
             return jsonify({'success': False, 'error': '缺少请求数据'}), 400
         
         # 验证必填字段
@@ -70,6 +72,7 @@ def create_project():
         
         # 检查是否已存在相同名称的项目
         existing_project = Project.query.filter_by(project_name=data['project_name']).first()
+        logger.info(f"[create_project] 唯一性校验: project_name={data['project_name']}，existing_project={existing_project}")
         if existing_project:
             return jsonify({'success': False, 'error': '项目名称已存在'}), 400
         
@@ -88,6 +91,8 @@ def create_project():
         
         db.session.add(new_project)
         db.session.commit()
+        # 新增：每次新建项目后立即刷新聚合表
+        update_all_project_summaries()
         
         # 新增：自动同步群聊
         internal_groups = data.get('internal_chat_groups', [])
@@ -128,8 +133,10 @@ def create_project():
             'message': '项目创建成功'
         })
     except Exception as e:
-        logger.error(f"创建项目失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"创建项目失败: {str(e)}\n{tb}")
+        return jsonify({'success': False, 'error': str(e), 'traceback': tb}), 500
 
 @projects_bp.route('/<int:project_id>', methods=['GET'])
 def get_project(project_id):
@@ -800,4 +807,30 @@ def get_risk_level(health_score):
     elif health_score >= 50:
         return 'risk'
     else:
-        return 'critical' 
+        return 'critical'
+
+@projects_bp.route('/<int:project_id>/archive', methods=['POST'])
+def archive_project(project_id):
+    """
+    归档项目（状态设为archived），并自动刷新聚合表
+    """
+    project = Project.query.get(project_id)
+    if not project:
+        return jsonify({'success': False, 'error': '项目不存在'}), 404
+    project.status = 'archived'
+    db.session.commit()
+    update_all_project_summaries()
+    return jsonify({'success': True, 'message': '项目已归档'})
+
+@projects_bp.route('/<int:project_id>/restore', methods=['POST'])
+def restore_project(project_id):
+    """
+    恢复项目为active，并自动刷新聚合表
+    """
+    project = Project.query.get(project_id)
+    if not project:
+        return jsonify({'success': False, 'error': '项目不存在'}), 404
+    project.status = 'active'
+    db.session.commit()
+    update_all_project_summaries()
+    return jsonify({'success': True, 'message': '项目已恢复为执行中'}) 

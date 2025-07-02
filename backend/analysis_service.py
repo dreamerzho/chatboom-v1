@@ -652,6 +652,7 @@ def update_all_project_summaries():
         summary = ProjectSummary(
             project_id=project_id,
             project_name=project_name,
+            status=project.status,
             total_files=total_files,
             total_workload_we=total_workload_we,
             health_score=health_score,

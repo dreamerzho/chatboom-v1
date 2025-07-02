@@ -14,7 +14,7 @@ class Project(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     project_name = db.Column(db.String(128), unique=True, nullable=False)  # 项目名称
-    description = db.Column(db.Text)  # 项目描述
+    description = db.Column(db.Text, nullable=True, default='')  # 项目描述
     status = db.Column(db.String(32), default='active')  # 项目状态：active/completed/paused/cancelled
     project_type = db.Column(db.String(32), default='standard')  # 项目类型：standard/urgent/vip/regular
     external_group_name = db.Column(db.Text)  # 外部群名称

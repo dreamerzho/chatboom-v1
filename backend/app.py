@@ -13,6 +13,8 @@ import logging
 from backend.db import db
 from backend.config import Config
 from backend.file_validator import FileNameValidator
+from apscheduler.schedulers.background import BackgroundScheduler
+from backend.analysis_service import update_all_project_summaries
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -205,6 +207,16 @@ def create_app():
 
     # 全局的OPTIONS预检请求处理已由`flask_cors`扩展自动完成，不再需要手动编写兜底路由。
     # 手动编写的路由与扩展冲突，是导致CORS预检失败和"Failed to fetch"错误的根源。
+    
+    # 启动APScheduler定时任务，每15分钟自动刷新聚合表
+    scheduler = BackgroundScheduler()
+    @scheduler.scheduled_job('interval', minutes=15)
+    def scheduled_etl():
+        with app.app_context():
+            print(f"[定时ETL] 自动刷新ProjectSummary聚合表...")
+            update_all_project_summaries()
+            print(f"[定时ETL] 聚合表刷新完成！")
+    scheduler.start()
     
     return app
 
