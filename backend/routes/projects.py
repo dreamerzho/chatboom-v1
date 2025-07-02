@@ -73,12 +73,14 @@ def create_project():
         if existing_project:
             return jsonify({'success': False, 'error': '项目名称已存在'}), 400
         
+        # 兼容前端多余字段，保证description/status有默认值
+        description = data.get('description', '')
+        status = data.get('status', 'active')
         # 创建新项目
         new_project = Project(
             project_name=data['project_name'],
-            description=data.get('description', ''),
-            status=data.get('status', 'active'),
-            # 只有当start_date和end_date在data中存在且不为空时，才进行转换
+            description=description,
+            status=status,
             start_date=datetime.fromisoformat(data['start_date']) if data.get('start_date') else None,
             end_date=datetime.fromisoformat(data['end_date']) if data.get('end_date') else None,
             created_at=datetime.utcnow()
