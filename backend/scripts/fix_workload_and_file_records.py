@@ -66,9 +66,18 @@ def batch_insert_workload_records(conn):
                 })
                 count += 1
     print(f"  已批量插入 {count} 条workload_records测试数据。")
+    # 新增：插入后立即查询workload_records表总数
+    total = conn.execute(text("SELECT COUNT(*) FROM workload_records")).scalar()
+    print(f"workload_records表当前总数: {total}")
 
 if __name__ == "__main__":
-    with engine.begin() as conn:
+    with engine.connect() as conn:
+        trans = conn.begin()
+        try:
         fix_file_records_upload_time(conn)
         batch_insert_workload_records(conn)
+            trans.commit()
+        except Exception as e:
+            print(f"[ERROR] 数据写入异常: {e}")
+            trans.rollback()
     print("\n[完成] 数据修复与补充已执行。")

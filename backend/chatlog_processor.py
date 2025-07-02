@@ -190,6 +190,7 @@ class ChatLogProcessor:
             start_date: 开始日期 (YYYY-MM-DD)，如果为None则使用最近7天
             end_date: 结束日期 (YYYY-MM-DD)，如果为None则使用今天
         """
+        from backend.chatlog_integration import ChatlogIntegration  # 局部导入，避免循环依赖
         from backend.models.project import Project, ProjectChatroom
         from backend.models.chat import ChatMessage
         from backend.models.file import FileRecord
@@ -342,6 +343,79 @@ class ChatLogProcessor:
                 self._log(f"群聊 {group_name} 处理完成。")
             
             self._log(f"全部群聊同步完成。共入库消息 {total_messages} 条，文件 {total_files} 条。")
+
+            # === 自动生成 WorkloadRecord ===
+            from backend.models.workload import WorkloadRecord
+            from backend.models.employee import EmployeeMapping
+            from backend.models.file import FileRecord
+            from backend.models.chat import ChatMessage
+            from backend.db import db
+            from datetime import datetime
+            # 简单规则：每条消息和文件都生成一条工作量记录
+            employees = {e.real_name: e.id for e in EmployeeMapping.query.all()}
+            # 消息
+            for msg in ChatMessage.query.filter_by(project_id=self.project_id).all():
+                emp_id = employees.get(msg.sender_name)
+                if not emp_id:
+                    continue
+                exists = WorkloadRecord.query.filter_by(
+                    employee_id=emp_id,
+                    project_id=self.project_id,
+                    date=msg.timestamp.date(),
+                    output_type='消息',
+                    output_value=str(msg.id)
+                ).first()
+                if exists:
+                    continue
+                record = WorkloadRecord(
+                    employee_id=emp_id,
+                    project_id=self.project_id,
+                    date=msg.timestamp.date(),
+                    role='文案',
+                    output_type='消息',
+                    output_value=str(msg.id),
+                    we_value=1.0,
+                    related_message_id=str(msg.id),
+                    created_at=datetime.utcnow()
+                )
+                db.session.add(record)
+            # 文件
+            for f in FileRecord.query.filter_by(project_id=self.project_id).all():
+                emp_id = employees.get(f.uploader)
+                if not emp_id:
+                    continue
+                exists = WorkloadRecord.query.filter_by(
+                    employee_id=emp_id,
+                    project_id=self.project_id,
+                    date=f.upload_time.date() if f.upload_time else datetime.utcnow().date(),
+                    output_type='文件',
+                    output_value=str(f.id)
+                ).first()
+                if exists:
+                    continue
+                record = WorkloadRecord(
+                    employee_id=emp_id,
+                    project_id=self.project_id,
+                    date=f.upload_time.date() if f.upload_time else datetime.utcnow().date(),
+                    role='设计',
+                    output_type='文件',
+                    output_value=str(f.id),
+                    we_value=1.0,
+                    related_file_id=f.id,
+                    created_at=datetime.utcnow()
+                )
+                db.session.add(record)
+            db.session.commit()
+            self._log("自动生成 WorkloadRecord 完成。")
+
+            # === 自动生成 ProjectHealthStats ===
+            try:
+                from backend.scripts.fix_project_health_stats import main as health_stats_main
+                health_stats_main(project_id=self.project_id)
+                self._log("自动生成 ProjectHealthStats 完成。")
+            except Exception as e:
+                self._log(f"自动生成 ProjectHealthStats 失败: {e}")
+
             return {
                 'success': True,
                 'message': f'同步完成，消息 {total_messages} 条，文件 {total_files} 条',
@@ -467,9 +541,36 @@ class ChatLogProcessor:
         ext_match = re.search(r'\.([a-zA-Z0-9]+)$', filename)
         return ext_match.group(1).lower() if ext_match else ''
 
+    # === WE换算工具函数 ===
+    def calculate_we_value(self, role, output_type, business_unit, is_final, is_iteration, quantity=1.0):
+        """
+        按V2模型查表换算WE值，支持最终版/迭代/管理/沟通等
+        """
+        from backend.models.workload import WorkloadWeights
+        from backend.db import db
+        we_value = 0.0
+        # 查找权重表
+        weight = WorkloadWeights.query.filter_by(
+            role=role,
+            output_type=output_type,
+            business_unit=business_unit,
+            is_final=is_final,
+            is_active=True
+        ).first()
+        if weight:
+            if is_iteration:
+                we_value = weight.we_per_unit * weight.iteration_multiplier * quantity
+            else:
+                we_value = weight.we_per_unit * quantity
+        else:
+            # 查不到时可加日志
+            import logging
+            logging.warning(f"WE权重未配置: {role}-{output_type}-{business_unit}-final={is_final}")
+        return we_value
+
     def _create_file_record(self, parsed_message: Dict[str, Any], employee_id: Optional[int], role: str, group_info: Dict) -> Optional[Dict]:
         """
-        创建文件记录
+        创建文件记录，并补全V2模型统计字段
         """
         content = parsed_message.get('parsed_content', {})
         filename = content.get('filename')
@@ -487,6 +588,15 @@ class ChatLogProcessor:
                 raw_time = 0
         timestamp = datetime.fromtimestamp(raw_time)
 
+        # === V2模型产出类型/业务单位/最终版识别（可根据实际业务完善） ===
+        output_type = '最终版-海报' if components.get('is_standard_format') else '其他'
+        business_unit = 'P'  # 可根据文件名或规则提取
+        is_final = True if '最终' in output_type else False
+        is_iteration = False
+        quantity = 1.0
+        # === 计算WE值 ===
+        we_value = self.calculate_we_value(role, output_type, business_unit, is_final, is_iteration, quantity)
+
         return {
             'project_id': self.project_id,
             'filename': filename,
@@ -501,11 +611,18 @@ class ChatLogProcessor:
             'parsed_date': components.get('date'),
             'parsed_author_abbreviation': components.get('author_abbreviation'),
             'parsed_version': components.get('version'),
+            # V2模型统计字段
+            'output_type': output_type,
+            'business_unit': business_unit,
+            'is_final': is_final,
+            'is_iteration': is_iteration,
+            'quantity': quantity,
+            'we_value': we_value
         }
 
     def _create_chat_message(self, parsed_message: Dict[str, Any], employee_id: Optional[int], role: str) -> Dict[str, Any]:
         """
-        创建聊天消息记录
+        创建聊天消息记录，并补全V2模型统计字段
         """
         from datetime import datetime
         time_val = parsed_message.get('time', 0)
@@ -522,6 +639,15 @@ class ChatLogProcessor:
         else:
             timestamp = datetime.utcnow()
 
+        # === V2模型产出类型/业务单位/最终版识别（可根据实际业务完善） ===
+        output_type = parsed_message.get('parsed_content', {}).get('type', '未知')
+        business_unit = '次'  # 消息类默认按"次"
+        is_final = False
+        is_iteration = False
+        quantity = 1.0
+        # === 计算WE值 ===
+        we_value = self.calculate_we_value(role, output_type, business_unit, is_final, is_iteration, quantity)
+
         return {
             'project_id': self.project_id,
             'message_id': parsed_message.get('seq'),
@@ -530,8 +656,15 @@ class ChatLogProcessor:
             'sender_role': role,
             'sender_nickname': parsed_message.get('sender_name'),
             'group_name': parsed_message.get('talker_name'),
-            'message_type': parsed_message.get('parsed_content', {}).get('type', '未知'),
-            'content': json.dumps(parsed_message.get('parsed_content', {}), ensure_ascii=False)
+            'message_type': output_type,
+            'content': json.dumps(parsed_message.get('parsed_content', {}), ensure_ascii=False),
+            # V2模型统计字段
+            'output_type': output_type,
+            'business_unit': business_unit,
+            'is_final': is_final,
+            'is_iteration': is_iteration,
+            'quantity': quantity,
+            'we_value': we_value
         }
 
     def process_and_deduplicate(self, 

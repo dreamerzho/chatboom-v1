@@ -12,6 +12,7 @@ from backend.models.risk_event import RiskEvent
 from backend.models import ChatMessage, FileRecord, Project, EmployeeMapping, ProjectChatroom, AnalysisConfig
 from backend.analysis_service import AnalysisService
 from backend.models.asset import Asset, AssetAnalysis
+from backend.models.project_summary import ProjectSummary
 
 # 创建仪表盘蓝图
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/v1/dashboard')
@@ -181,11 +182,14 @@ def get_top_performers():
 @dashboard_bp.route('/project-summary', methods=['GET'])
 def get_project_summary():
     """
-    获取项目风险榜，按健康分倒序
-    直接从聚合后的项目健康统计表中获取，更高效稳定
+    获取项目摘要榜单，直接从ProjectSummary表读取
     """
-    summary = ProjectHealthStats.query.order_by(ProjectHealthStats.health_score.asc()).limit(20).all()
-    return jsonify([s.to_dict() for s in summary])
+    try:
+        summaries = ProjectSummary.query.order_by(ProjectSummary.health_score.asc()).limit(20).all()
+        data = [s.to_dict() for s in summaries]
+        return jsonify({'success': True, 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ========== 新增：兼容前端的仪表盘统计接口 ==========
 
@@ -755,111 +759,14 @@ def get_project_risks():
 @dashboard_bp.route('/overview', methods=['GET'])
 def get_dashboard_overview():
     """
-    获取仪表盘概览数据
-    一次性返回所有仪表盘组件需要的数据
+    获取仪表盘概览数据，直接从ProjectSummary表读取
     """
     try:
-        # 获取时间范围参数
-        start_date_str = request.args.get('start_date')
-        end_date_str = request.args.get('end_date')
-        
-        # 默认最近7天
-        if not start_date_str:
-            end_date = date.today()
-            start_date = end_date - timedelta(days=7)
-        else:
-            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else date.today()
-        
-        # 获取所有数据
-        overview_data = {
-            'kpis': analysis_service.get_dashboard_kpis(start_date, end_date),
-            'workload_trends': [],
-            'team_performance': {},
-            'project_risks': []
-        }
-        
-        # 获取工作量趋势
-        daily_workload = db.session.query(
-            Asset.submission_date,
-            func.sum(Asset.workload_equivalent).label('total_we'),
-            func.count(Asset.id).label('asset_count')
-        ).filter(
-            and_(
-                Asset.submission_date >= start_date,
-                Asset.submission_date <= end_date
-            )
-        ).group_by(
-            Asset.submission_date
-        ).order_by(
-            Asset.submission_date
-        ).all()
-        
-        for submission_date, total_we, asset_count in daily_workload:
-            overview_data['workload_trends'].append({
-                'date': submission_date.strftime('%m-%d'),
-                'total_we': round(total_we or 0, 2),
-                'asset_count': asset_count
-            })
-        
-        # 获取团队效能榜
-        employees = EmployeeMapping.query.filter(EmployeeMapping.role == '内部员工').all()
-        performance_data = {'design': [], 'copywriting': [], 'pm_ae': []}
-        
-        for employee in employees:
-            load_data = analysis_service.calculate_employee_load_index(employee.id, start_date, end_date)
-            position = employee.position or '其他'
-            
-            if '设计' in position or '美术' in position:
-                category = 'design'
-            elif '文案' in position or '编辑' in position:
-                category = 'copywriting'
-            else:
-                category = 'pm_ae'
-            
-            performance_data[category].append({
-                'employee_id': employee.id,
-                'real_name': employee.real_name,
-                'position': position,
-                'output_we': load_data['output_we'],
-                'process_we': load_data['process_we'],
-                'avg_iteration': load_data.get('avg_iterations', 0)
-            })
-        
-        for category in performance_data:
-            performance_data[category].sort(key=lambda x: x['output_we'], reverse=True)
-        
-        overview_data['team_performance'] = performance_data
-        
-        # 获取项目风险榜
-        projects = Project.query.filter(Project.status == 'active').all()
-        for project in projects:
-            health_data = analysis_service.calculate_project_health_score(project.id)
-            if health_data:
-                overview_data['project_risks'].append({
-                    'project_id': project.id,
-                    'project_name': project.project_name,
-                    'health_score': health_data['health_score'],
-                    'risk_level': health_data['risk_level'],
-                    'main_risk': health_data.get('risk_factors', ['-'])[0] if health_data.get('risk_factors') else '-'
-                })
-        
-        overview_data['project_risks'].sort(key=lambda x: x['health_score'])
-        
-        return jsonify({
-            'success': True,
-            'data': overview_data,
-            'time_range': {
-                'start_date': start_date.isoformat(),
-                'end_date': end_date.isoformat()
-            }
-        })
-        
+        summaries = ProjectSummary.query.all()
+        data = [s.to_dict() for s in summaries]
+        return jsonify({'success': True, 'data': data})
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ====== 算法参数配置API ======
 @dashboard_bp.route('/analysis/config', methods=['GET'])
@@ -896,5 +803,12 @@ def set_analysis_config():
 
 @dashboard_bp.route('/', methods=['GET'])
 def dashboard_root():
-    """兼容前端：dashboard根路由重定向到overview"""
-    return get_dashboard_overview() 
+    """
+    获取仪表盘全部项目摘要，兼容前端
+    """
+    try:
+        summaries = ProjectSummary.query.all()
+        data = [s.to_dict() for s in summaries]
+        return jsonify({'success': True, 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500 

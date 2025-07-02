@@ -7,6 +7,7 @@ from .file import FileRecord, FileVersion
 from .chat import ChatMessage
 from .keyword import KeywordCategory, Keyword, KeywordAnalysis, MessageKeyword
 from .risk_event import RiskEvent
+from .project_summary import ProjectSummary
 from datetime import datetime
 from backend.db import db
 
@@ -21,7 +22,8 @@ __all__ = [
     'Keyword',
     'KeywordAnalysis',
     'MessageKeyword',
-    'RiskEvent'
+    'RiskEvent',
+    'ProjectSummary'
 ] 
 
 class AnalysisConfig(db.Model):

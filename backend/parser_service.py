@@ -72,6 +72,7 @@ class ParserService:
         is_valid = True
         is_original = True
         is_reference = False
+        extra = {}
         # 预处理
         if not filename or not isinstance(filename, str):
             parse_errors.append('文件名为空或类型错误')
@@ -94,19 +95,25 @@ class ParserService:
                 submission_date = self._parse_date(date_str)
                 if not submission_date:
                     parse_errors.append(f"无法解析日期: {date_str}")
+                extra['date_str'] = date_str
                 # 版本
                 version_str = groups.get('version', 'V1')
                 version = self._parse_version(version_str)
+                extra['version_str'] = version_str
                 # 项目/任务
                 project = self._normalize_text(groups.get('project', '').strip())
                 desc = self._normalize_text(groups.get('desc', '').strip())
                 task_identifier = f"{project}-{desc}" if project and desc else desc
+                extra['project'] = project
+                extra['desc'] = desc
                 # 工作量
                 workload_amount = groups.get('workload')
                 if workload_amount:
                     workload_amount = self._normalize_workload(workload_amount)
+                extra['workload_amount'] = workload_amount
                 # 作者缩写
                 author_abbreviation = self._normalize_text(groups.get('author', '').strip()).upper()
+                extra['author_abbreviation'] = author_abbreviation
                 # 文件类型
                 ext = groups.get('ext', '').lower()
                 fname = match.string.lower()
@@ -115,11 +122,17 @@ class ParserService:
                         if t in fname:
                             ext = t
                             break
+                extra['file_extension'] = ext
                 # 参考/原创判定
-                if any(k in fname for k in ['参考', '素材']):
+                reference_keywords = ['参考', '素材', '修改稿', '修订', '参考版', '草稿']
+                if any(k in fname for k in reference_keywords):
                     is_reference = True
                     is_original = False
+                    extra['reference_reason'] = '命中参考/素材/修改稿等关键词'
                 elif not version_str:
+                    is_original = True
+                else:
+                    # 没有参考关键词，且有版本号，默认原创
                     is_original = True
                 return ParsedAssetData(
                     submission_date=submission_date,
@@ -134,12 +147,14 @@ class ParserService:
                     is_valid=is_valid and not parse_errors,
                     is_original=is_original,
                     is_reference=is_reference,
-                    parse_errors=parse_errors
+                    parse_errors=parse_errors,
+                    extra=extra
                 )
             except Exception as e:
                 parse_errors.append(f"解析过程中发生错误: {str(e)}")
                 is_compliant = False
                 is_valid = False
+                extra['exception'] = str(e)
         # --- 兜底：正则不匹配或解析失败 ---
         # 多源融合补全
         author_abbreviation = ''
@@ -150,9 +165,13 @@ class ParserService:
         workload_amount = None
         version = 1
         task_identifier = ''
+        uploader = ''
+        employee_id = None
         if file_record:
             # 作者缩写
             author_abbreviation = (file_record.get('author_abbreviation') or '').upper()
+            uploader = (file_record.get('uploader') or '').upper()
+            employee_id = file_record.get('employee_id')
             # 文件类型
             ext = (file_record.get('file_extension') or '').lower()
             # 项目/任务
@@ -175,16 +194,25 @@ class ParserService:
             version = 1
             # 参考/原创判定
             fname = filename.lower()
-            if any(k in fname for k in ['参考', '素材']):
+            reference_keywords = ['参考', '素材', '修改稿', '修订', '参考版', '草稿']
+            if any(k in fname for k in reference_keywords):
                 is_reference = True
                 is_original = False
+                extra['reference_reason'] = '命中参考/素材/修改稿等关键词'
+            # 多源融合补充
+            extra['uploader'] = uploader
+            extra['employee_id'] = employee_id
+            extra['file_record_fields'] = {k: file_record.get(k) for k in file_record}
         else:
             parse_errors.append('未提供file_record，无法补全作者、类型等信息')
         parse_errors.append(f"文件名 '{filename}' 不符合命名规范，已用file_record兜底")
+        # 记录所有可用原始信息
+        extra['raw_filename'] = filename
+        extra['raw_file_record'] = file_record
         return ParsedAssetData(
             submission_date=submission_date,
             task_identifier=task_identifier,
-            author_abbreviation=author_abbreviation,
+            author_abbreviation=author_abbreviation or uploader,
             version=version,
             workload_amount=workload_amount,
             project_name=project,
@@ -194,7 +222,8 @@ class ParserService:
             is_valid=False,
             is_original=is_original,
             is_reference=is_reference,
-            parse_errors=parse_errors
+            parse_errors=parse_errors,
+            extra=extra
         )
     
     def _parse_date(self, date_str: str) -> Optional[date]:

@@ -262,6 +262,10 @@ export const projectAPI = {
   getProjectDetail: (id: string | number, period: string = '7d') =>
     apiRequest(`/api/v1/projects/${id}?period=${period}`),
 
+  // 新增：获取项目聚合视图（overview）
+  getProjectOverview: (id: string | number, period: string = '7d') =>
+    apiRequest(`/api/v1/projects/${id}/overview?period=${period}`),
+
   // 获取项目文件列表
   getProjectFiles: (projectName: string) =>
     apiRequest(`/api/v1/files/list?project_name=${encodeURIComponent(projectName)}`),

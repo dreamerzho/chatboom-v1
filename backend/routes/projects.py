@@ -14,6 +14,7 @@ from itertools import groupby
 from backend.analysis_service import AnalysisService
 from backend.models.keyword import KeywordAnalysis
 from backend.models.asset import Asset
+from backend.models.project_summary import ProjectSummary
 
 # 创建蓝图
 projects_bp = Blueprint('projects', __name__, url_prefix='/api/v1/projects')
@@ -24,49 +25,30 @@ logger = logging.getLogger(__name__)
 @projects_bp.route('/', methods=['GET'])
 def get_projects():
     """
-    获取所有项目列表
-    返回: 项目数据列表，每个项目包含群聊信息
+    获取所有项目列表，直接从ProjectSummary表读取
     """
     try:
-        projects = Project.query.all()
+        summaries = ProjectSummary.query.all()
         project_list = []
-        for project in projects:
-            # 获取项目关联的群聊列表
-            chatrooms = list(project.chatrooms)
-            # 分组
-            internal_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '内部群聊']
-            external_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '外部群聊']
-            chatrooms_dict = [
-                {
-                    'id': c.id,
-                    'chatroom_id': c.chatroom_id,
-                    'chatroom_name': c.chatroom_name,
-                    'chatroom_type': c.chatroom_type,
-                    'created_at': c.created_at.isoformat() if c.created_at else None
-                } for c in chatrooms
-            ]
-            # 新增：统计文件数量
-            file_count = FileRecord.query.filter_by(project_id=project.id).count()
+        for s in summaries:
+            d = s.to_dict()
+            # 兼容前端ProjectCard结构
             project_list.append({
-                'id': project.id,
-                'project_name': project.project_name,
-                'description': project.description,
-                'status': project.status,
-                'start_date': project.start_date.isoformat() if project.start_date else None,
-                'end_date': project.end_date.isoformat() if project.end_date else None,
-                'created_at': project.created_at.isoformat() if project.created_at else None,
-                'updated_at': project.updated_at.isoformat() if project.updated_at else None,
-                'chatrooms': chatrooms_dict,
-                'internal_chat_groups': internal_chat_groups,
-                'external_chat_groups': external_chat_groups,
-                'file_count': file_count  # 新增字段
+                'id': d['project_id'],
+                'project_name': d['project_name'],
+                'total_files': d['total_files'],
+                'total_workload_we': d['total_workload_we'],
+                'health_score': d['health_score'],
+                'rework_rate': d['rework_rate'],
+                'avg_internal_revisions': d['avg_internal_revisions'],
+                'avg_customer_revisions': d['avg_customer_revisions'],
+                'risk_events_count': d['risk_events_count'],
+                'positive_feedback_count': d['positive_feedback_count'],
+                'negative_feedback_count': d['negative_feedback_count'],
+                'last_updated': d['last_updated']
             })
-        return jsonify({
-            'success': True,
-            'data': project_list
-        })
+        return jsonify({'success': True, 'data': project_list})
     except Exception as e:
-        logger.error(f"获取项目列表失败: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @projects_bp.route('/', methods=['POST'])
@@ -690,6 +672,121 @@ def get_project_files(project_id):
     files = FileRecord.query.filter_by(project_id=project_id).all()
     file_list = [f.to_dict() for f in files]
     return jsonify({'success': True, 'data': file_list})
+
+@projects_bp.route('/<int:project_id>/overview', methods=['GET'])
+def get_project_overview(project_id):
+    """
+    聚合返回项目详情页所需全部数据，支持 period 参数（如 7d/30d/month/all）
+    """
+    try:
+        period = request.args.get('period', '30d')
+        # 解析 period
+        if period == 'all':
+            since = None
+        elif period.endswith('d'):
+            days = int(period.replace('d',''))
+            since = datetime.now() - timedelta(days=days)
+        elif period == 'month':
+            since = datetime.now() - timedelta(days=30)
+        else:
+            since = datetime.now() - timedelta(days=30)
+        # 1. 项目基本信息
+        project = Project.query.get(project_id)
+        if not project:
+            return jsonify({'success': False, 'error': '项目不存在'}), 404
+        # 2. 群聊信息
+        chatrooms = ProjectChatroom.query.filter_by(project_id=project_id).all()
+        chatroom_list = [
+            {
+                'id': c.id,
+                'chatroom_name': c.chatroom_name,
+                'chatroom_type': c.chatroom_type,
+                'created_at': c.created_at.isoformat() if c.created_at else None
+            } for c in chatrooms
+        ]
+        chatroom_names = [c.chatroom_name for c in chatrooms]
+        # 3. 健康趋势
+        health_stats_query = ProjectHealthStats.query.filter(ProjectHealthStats.project_id == project_id)
+        if since:
+            health_stats_query = health_stats_query.filter(ProjectHealthStats.created_at >= since)
+        health_stats = health_stats_query.order_by(ProjectHealthStats.created_at.desc()).all()
+        health_stats_data = [s.to_dict() for s in health_stats] if health_stats else []
+        # 4. WE分布
+        records_query = WorkloadRecord.query.filter(WorkloadRecord.project_id == project_id)
+        if since:
+            records_query = records_query.filter(WorkloadRecord.date >= since)
+        records = records_query.all()
+        color_list = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#8dd1e1', '#a4de6c']
+        employee_map = {e.id: e.real_name for e in EmployeeMapping.query.all()}
+        we_data = []
+        if records:
+            for idx, (emp_id, group) in enumerate(groupby(sorted(records, key=lambda r: r.employee_id), key=lambda r: r.employee_id)):
+                total_we = sum(r.we_value or 0 for r in group)
+                we_data.append({
+                    'name': employee_map.get(emp_id, f'员工{emp_id}'),
+                    'value': total_we,
+                    'color': color_list[idx % len(color_list)]
+                })
+        if not we_data:
+            we_data = []
+        # 5. 成员列表
+        employee_ids = set([r.employee_id for r in records])
+        members = [employee_map.get(eid, '未知') for eid in employee_ids] if employee_ids else []
+        # 6. 风险事件
+        risk_events_query = RiskEvent.query.filter(RiskEvent.project_id == project_id)
+        if since:
+            risk_events_query = risk_events_query.filter(RiskEvent.event_time >= since)
+        risk_events = risk_events_query.order_by(RiskEvent.event_time.desc()).limit(20).all()
+        risks = [r.to_dict() for r in risk_events] if risk_events else []
+        # 7. 项目健康分
+        service = AnalysisService()
+        health = service.calculate_project_health_score(project_id) or {}
+        # 8. 近期动态
+        recent_files = FileRecord.query.filter_by(project_id=project_id).order_by(FileRecord.upload_time.desc()).limit(5).all()
+        recent_msgs = ChatMessage.query.filter(ChatMessage.talker_name.in_(chatroom_names)).order_by(ChatMessage.timestamp.desc()).limit(5).all() if chatroom_names else []
+        recent_activities = [
+            {
+                'type': 'file_upload',
+                'title': f.original_name,
+                'description': f'由{f.uploader}上传',
+                'time': f.upload_time.isoformat() if f.upload_time else '',
+                'status': f.status
+            } for f in recent_files
+        ] + [
+            {
+                'type': 'message',
+                'title': m.content[:20] if m.content else '',
+                'description': f'由{m.sender_name}发送',
+                'time': m.timestamp.isoformat() if m.timestamp else '',
+                'status': m.message_type
+            } for m in recent_msgs
+        ]
+        recent_activities = sorted(recent_activities, key=lambda x: x['time'], reverse=True)[:10] if recent_activities else []
+        # 9. 组装返回
+        overview = {
+            'project': {
+                'id': project.id,
+                'project_name': project.project_name,
+                'description': project.description,
+                'status': project.status,
+                'start_date': project.start_date.isoformat() if project.start_date else None,
+                'end_date': project.end_date.isoformat() if project.end_date else None,
+                'created_at': project.created_at.isoformat() if project.created_at else None,
+                'updated_at': project.updated_at.isoformat() if project.updated_at else None,
+            },
+            'chatrooms': chatroom_list,
+            'healthStats': health_stats_data,
+            'weData': we_data,
+            'members': members,
+            'risks': risks,
+            'health': health,
+            'recent_activities': recent_activities,
+            'period': period
+        }
+        return jsonify({'success': True, 'data': overview})
+    except Exception as e:
+        logger.error(f"获取项目聚合视图失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 def get_risk_level(health_score):
     if health_score is None:

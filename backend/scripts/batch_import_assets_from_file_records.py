@@ -33,32 +33,48 @@ def batch_import_assets():
             # 传入file_record信息，提升兜底归因能力
             parsed = parser.parse(f.original_name, file_record={
                 'author_abbreviation': getattr(f, 'uploader', None),
+                'uploader': getattr(f, 'uploader', None),
+                'employee_id': getattr(f, 'employee_id', None),
                 'file_extension': getattr(f, 'file_extension', None),
                 'project_name': getattr(f, 'project_name', None),
                 'work_order': getattr(f, 'work_order', None),
                 'workload': getattr(f, 'workload', None),
                 'upload_time': getattr(f, 'upload_time', None)
             })
-            if not parsed or not parsed.is_valid:
-                error += 1
-                print(f"[WARN] 文件: {f.original_name}, 解析不全, parse_errors: {parsed.parse_errors if parsed else 'None'}")
+            # 字段兜底与类型安全，优先用解析结果，无则用 file_record 原始字段
+            file_extension = (parsed.file_extension or f.file_extension or '').lower().strip() if (parsed.file_extension or f.file_extension) else ''
+            author_abbreviation = (parsed.author_abbreviation or f.uploader or '')
+            if author_abbreviation:
+                author_abbreviation = str(author_abbreviation).strip().upper()
+            file_type = (f.file_type or '').lower().strip() if f.file_type else ''
+            file_category = (f.file_category or '').strip() if f.file_category else ''
+            status = f.status or ('compliant' if parsed.is_compliant else 'non_compliant')
             # 只要有基础信息就生成Asset
             asset = Asset(
-                file_id=f.id,
-                project_id=f.project_id,
-                employee_id=f.employee_id,
-                submission_date=parsed.submission_date or f.upload_time.date() if f.upload_time else None,
-                task_identifier=parsed.task_identifier or f.original_name,
-                author_abbreviation=parsed.author_abbreviation or (f.uploader or ''),
+                original_name=f.original_name or '',
+                file_path=f.file_path or '',
+                file_size=f.file_size or 0,
+                file_md5=f.file_md5 or '',
+                file_extension=file_extension,
+                file_type=file_type,
+                file_category=file_category,
+                task_identifier=parsed.task_identifier or f.work_order or '',
+                submission_date=parsed.submission_date or (f.upload_time.date() if f.upload_time else None),
                 version=parsed.version or 1,
-                workload_amount=parsed.workload_amount,
-                project_name=parsed.project_name or f.project_name,
-                work_order=parsed.work_order or f.work_order,
-                file_extension=parsed.file_extension or f.file_extension,
-                is_compliant=parsed.is_compliant,
-                is_original=parsed.is_original,
-                is_reference=parsed.is_reference,
-                parse_errors=json.dumps(parsed.parse_errors) if parsed and parsed.parse_errors else None
+                workload_amount=parsed.workload_amount or f.workload or '',
+                author_abbreviation=author_abbreviation,
+                author_id=f.employee_id,
+                project_id=f.project_id,
+                chatroom_name=f.chatroom_name or '',
+                message_seq=f.message_seq or '',
+                uploader=f.uploader or '',
+                upload_time=f.upload_time or datetime.utcnow(),
+                status=status,
+                tags=f.tags or '',
+                is_archived=f.is_archived or False,
+                archive_path=f.archive_path or '',
+                created_at=f.created_at or datetime.utcnow(),
+                updated_at=f.updated_at or datetime.utcnow()
             )
             # 计算 WE
             asset.workload_equivalent = analyzer.calculate_workload_equivalent(asset)
@@ -72,6 +88,9 @@ def batch_import_assets():
             asset.is_final_version = ('final' in (f.original_name or '').lower()) or ('最终' in (f.original_name or ''))
             session.add(asset)
             count += 1
+            # 日志输出 parse_errors 和 extra 字段内容
+            if parsed and (parsed.parse_errors or parsed.extra):
+                print(f"[INFO] 文件: {f.original_name}, parse_errors: {parsed.parse_errors}, extra: {json.dumps(parsed.extra, ensure_ascii=False)}")
         except Exception as e:
             error += 1
             print(f"[ERROR] 跳过文件: {f.original_name}, 错误: {str(e)}")

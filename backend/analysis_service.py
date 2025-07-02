@@ -14,6 +14,7 @@ from backend.models.employee import EmployeeMapping
 from backend.models.project import Project
 from backend.parser_service import ParserService
 from backend.models import AnalysisConfig
+from backend.models.project_summary import ProjectSummary
 
 class AnalysisService:
     """
@@ -600,4 +601,67 @@ class AnalysisService:
                 return as_type(config.value)
             except Exception:
                 return config.value
-        return default 
+        return default
+
+def update_all_project_summaries():
+    """
+    批量更新所有项目的核心聚合指标到ProjectSummary表（ETL）
+    """
+    from backend.models.project import Project
+    from backend.models.asset import Asset
+    from backend.models.file import FileRecord
+    from backend.models.risk_event import RiskEvent
+    from backend.models.keyword import KeywordAnalysis
+    from sqlalchemy import func
+    from datetime import datetime
+    projects = Project.query.all()
+    for project in projects:
+        # 1. 项目基础信息
+        project_id = project.id
+        project_name = project.project_name
+        # 2. 文件总数
+        total_files = FileRecord.query.filter_by(project_id=project_id).count()
+        # 3. 总工作量WE
+        assets = Asset.query.filter_by(project_id=project_id).all()
+        total_workload_we = sum(a.workload_equivalent or 0 for a in assets)
+        # 4. 健康分（复用原有算法）
+        service = AnalysisService()
+        health_data = service.calculate_project_health_score(project_id)
+        health_score = health_data.get('health_score', 0) if health_data else 0
+        # 5. 返工率（客户返工/总文件）
+        rework_files = FileRecord.query.filter_by(project_id=project_id, status='rework').count() if hasattr(FileRecord, 'status') else 0
+        rework_rate = round((rework_files / total_files) * 100, 2) if total_files else 0.0
+        # 6. 平均内部迭代次数
+        avg_internal_revisions = 0.0
+        if assets:
+            avg_internal_revisions = sum(a.version for a in assets) / len(assets)
+        # 7. 平均客户迭代次数（如有客户修正标记，可补充）
+        avg_customer_revisions = 0.0  # 占位，后续可细化
+        # 8. 风险事件数
+        risk_events_count = RiskEvent.query.filter_by(project_id=project_id).count()
+        # 9. 正向反馈数、负向反馈数（如有关键词分析表/服务，可补充）
+        positive_feedback_count = 0
+        negative_feedback_count = 0
+        keyword_analysis = KeywordAnalysis.query.filter_by(project_id=project_id).order_by(KeywordAnalysis.created_at.desc()).first()
+        if keyword_analysis:
+            positive_feedback_count = keyword_analysis.positive_score or 0
+            negative_feedback_count = keyword_analysis.negative_score or 0
+        # 10. 更新时间
+        last_updated = datetime.utcnow()
+        # Upsert到ProjectSummary表
+        summary = ProjectSummary(
+            project_id=project_id,
+            project_name=project_name,
+            total_files=total_files,
+            total_workload_we=total_workload_we,
+            health_score=health_score,
+            rework_rate=rework_rate,
+            avg_internal_revisions=avg_internal_revisions,
+            avg_customer_revisions=avg_customer_revisions,
+            risk_events_count=risk_events_count,
+            positive_feedback_count=positive_feedback_count,
+            negative_feedback_count=negative_feedback_count,
+            last_updated=last_updated
+        )
+        db.session.merge(summary)
+    db.session.commit() 
