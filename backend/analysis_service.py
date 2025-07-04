@@ -649,20 +649,36 @@ def update_all_project_summaries():
         # 10. 更新时间
         last_updated = datetime.utcnow()
         # Upsert到ProjectSummary表
-        summary = ProjectSummary(
-            project_id=project_id,
-            project_name=project_name,
-            status=project.status,
-            total_files=total_files,
-            total_workload_we=total_workload_we,
-            health_score=health_score,
-            rework_rate=rework_rate,
-            avg_internal_revisions=avg_internal_revisions,
-            avg_customer_revisions=avg_customer_revisions,
-            risk_events_count=risk_events_count,
-            positive_feedback_count=positive_feedback_count,
-            negative_feedback_count=negative_feedback_count,
-            last_updated=last_updated
-        )
-        db.session.merge(summary)
+        existing = ProjectSummary.query.filter_by(project_id=project_id).first()
+        if existing:
+            # update 所有字段
+            existing.project_name = project_name
+            existing.status = project.status
+            existing.total_files = total_files
+            existing.total_workload_we = total_workload_we
+            existing.health_score = health_score
+            existing.rework_rate = rework_rate
+            existing.avg_internal_revisions = avg_internal_revisions
+            existing.avg_customer_revisions = avg_customer_revisions
+            existing.risk_events_count = risk_events_count
+            existing.positive_feedback_count = positive_feedback_count
+            existing.negative_feedback_count = negative_feedback_count
+            existing.last_updated = last_updated
+        else:
+            summary = ProjectSummary(
+                project_id=project_id,
+                project_name=project_name,
+                status=project.status,
+                total_files=total_files,
+                total_workload_we=total_workload_we,
+                health_score=health_score,
+                rework_rate=rework_rate,
+                avg_internal_revisions=avg_internal_revisions,
+                avg_customer_revisions=avg_customer_revisions,
+                risk_events_count=risk_events_count,
+                positive_feedback_count=positive_feedback_count,
+                negative_feedback_count=negative_feedback_count,
+                last_updated=last_updated
+            )
+            db.session.add(summary)
     db.session.commit() 

@@ -25,13 +25,13 @@ def clear_and_recreate_db():
             'project_chatrooms',
             'project_summary',
             'projects',
-            'employee_mappings',
+            # 'employee_mappings',  # 保留员工表数据，不清空
         ]
         for table in tables:
             db.session.execute(text(f'TRUNCATE TABLE {table} RESTART IDENTITY CASCADE;'))
         db.session.commit()
         db.create_all()
-        print('数据库核心表已全部清空并重建！')
+        print('数据库核心表（除员工表）已全部清空并重建，employee_mappings 数据已保留！')
 
 if __name__ == '__main__':
     clear_and_recreate_db() 

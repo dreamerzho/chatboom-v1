@@ -22,6 +22,7 @@ from backend.models.employee import EmployeeMapping
 from backend.db import db
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import and_, or_
+from backend.identity_service import IdentityService
 # from backend.chatlog_integration import ChatlogIntegration  # 移除顶部导入，避免循环依赖
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,7 @@ class ChatLogProcessor:
         self.date_str = date_str
         self.yield_log = yield_log or (lambda msg: logger.info(msg))
         self.employees = self._load_employees()
+        self.identity_service = IdentityService(db.session)
 
     def _log(self, message: str):
         """记录并可能发送日志"""
@@ -175,259 +177,69 @@ class ChatLogProcessor:
         self._log(f"成功加载 {len(employee_list)} 条员工信息。")
         return employee_list
 
-    def process_chatlogs(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    def process_chatlogs(self, start_time: str = None, end_time: str = None, chatroom_names: list = None, sync_type: str = None, force_resync: bool = False, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
         处理并同步项目的聊天记录（只通过chatlogAPI获取）
-        基于 seq 字段进行高效去重，使用数据库级别的 UPSERT 操作
-        步骤：
-        1. 读取项目的所有群昵称（chatroom_name），遍历每个群聊。
-        2. 对每个群聊，调用chatlogAPI拉取消息（get_chatlog_by_talker_and_time），按时间段。
-        3. 用process_and_deduplicate处理消息，批量入库ChatMessage和FileRecord。
-        4. 统计消息数、文件数，返回真实统计。
-        5. 日志详细，异常处理健壮。
-        
-        参数:
-            start_date: 开始日期 (YYYY-MM-DD)，如果为None则使用最近7天
-            end_date: 结束日期 (YYYY-MM-DD)，如果为None则使用今天
+        只返回所有解析后的 file_records 字典，不直接插入数据库，由上层统一批量入库。
+        兼容新老参数
         """
         from backend.chatlog_integration import ChatlogIntegration  # 局部导入，避免循环依赖
-        from backend.models.project import Project, ProjectChatroom
-        from backend.models.chat import ChatMessage
-        from backend.models.file import FileRecord
-        from backend.db import db
-        import traceback
-        
+        from backend.models.project import Project
+        # 参数兼容
+        _start = start_time or start_date
+        _end = end_time or end_date
         self._log(f"--- 开始处理项目ID: {self.project_id} 的聊天记录 ---")
         try:
             project = Project.query.get(self.project_id)
             if not project:
                 self._log(f"未找到项目ID: {self.project_id}")
                 return {'success': False, 'message': f'未找到项目ID: {self.project_id}', 'logs': []}
-            
-            # 获取所有群聊昵称
             chatrooms = project.chatrooms.all()
             if not chatrooms:
                 self._log(f"项目未配置任何群聊，无法同步")
                 return {'success': False, 'message': '项目未配置任何群聊', 'logs': []}
-            
-            # 设置时间范围
             from datetime import datetime, timedelta
-            if not end_date:
-                end_date = datetime.now().strftime('%Y-%m-%d')
-            if not start_date:
-                start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-            
-            self._log(f"📅 同步时间范围: {start_date} ~ {end_date}")
-            
+            if not _end:
+                _end = datetime.now().strftime('%Y-%m-%d')
+            if not _start:
+                _start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            self._log(f"📅 同步时间范围: {_start} ~ {_end}")
             chatlog_client = ChatlogIntegration()
             total_messages = 0
             total_files = 0
             all_new_msgs = []
             all_new_files = []
-            
             for chatroom in chatrooms:
                 group_name = chatroom.chatroom_name
                 group_type = chatroom.chatroom_type
                 self._log(f"同步群聊：{group_name}（类型：{group_type}）...")
-                
-                # 拉取该群的消息
                 msgs = chatlog_client.get_chatlog_by_talker_and_time(
                     talker=group_name,
-                    start_date=start_date,
-                    end_date=end_date
+                    start_date=_start,
+                    end_date=_end
                 )
                 self._log(f"获取到 {len(msgs)} 条消息，开始解析...")
-                
                 group_info = {'name': group_name, 'type': group_type}
                 dedup_result = self.process_and_deduplicate(msgs, group_info)
-                
-                # 批量入库消息（使用 UPSERT 防止重复报错）
                 chat_messages = dedup_result['chat_messages']
-                if chat_messages:
-                    try:
-                        # 构建插入语句，使用 ON CONFLICT DO NOTHING 进行去重
-                        insert_stmt = insert(ChatMessage).values([
-                            {
-                                'message_id': msg.get('message_id'),  # 存储 seq 值
-                                'project_id': self.project_id,
-                                'talker_name': group_name,
-                                'sender_name': msg['sender_nickname'],
-                                'message_type': msg['message_type'],
-                                'content': msg['content'],
-                                'timestamp': msg['message_time'],
-                                'created_at': datetime.utcnow(),
-                            }
-                            for msg in chat_messages
-                        ])
-                        
-                        # 使用复合唯一约束进行去重
-                        do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
-                            index_elements=['project_id', 'message_id']
-                        )
-                        insert_result = db.session.execute(do_nothing_stmt)
-                        db.session.commit()
-                        
-                        # 统计实际插入的记录数
-                        try:
-                            inserted_count = insert_result.rowcount if hasattr(insert_result, 'rowcount') else len(chat_messages)
-                        except:
-                            inserted_count = len(chat_messages)  # 如果无法获取 rowcount，使用原始数量
-                        total_messages += inserted_count
-                        all_new_msgs.extend(chat_messages)
-                        self._log(f"群聊 {group_name} 批量入库消息 {inserted_count} 条（已自动跳过重复消息）。")
-                        
-                    except Exception as e:
-                        db.session.rollback()
-                        self._log(f"消息批量入库失败: {e}")
-                
-                # 批量入库文件（使用 UPSERT 进行去重）
                 file_records = dedup_result['file_records']
+                if chat_messages:
+                    all_new_msgs.extend(chat_messages)
                 if file_records:
-                    valid_files = []
-                    for file in file_records:
-                        try:
-                            # 字段校验与默认值
-                            filename = file.get('filename', '') or ''
-                            group_name = file.get('group_name', '') or ''
-                            file_type = file.get('file_type', '') or ''
-                            uploader_id = str(file.get('uploader_id')) if file.get('uploader_id') else ''
-                            upload_time = file.get('upload_time') or datetime.utcnow()
-                            # 唯一性校验（project_id+chatroom_name+original_name）
-                            exists = FileRecord.query.filter_by(
-                                project_id=self.project_id,
-                                chatroom_name=group_name,
-                                original_name=filename
-                            ).first()
-                            if exists:
-                                self._log(f"跳过重复文件: {filename} (群聊={group_name})")
-                                continue
-                            # 校验通过，加入待插入列表
-                            valid_files.append({
-                                'project_id': self.project_id,
-                                'project_name': project.project_name,
-                                'chatroom_name': group_name,
-                                'original_name': filename,
-                                'standardized_name': filename,
-                                'author_abbreviation': file.get('parsed_author_abbreviation') or '',
-                                'version': file.get('parsed_version') or '',
-                                'file_extension': file_type,
-                                'upload_time': upload_time,
-                                'uploader': uploader_id,
-                                'status': 'pending',
-                                'message_seq': file.get('message_seq') if file.get('message_seq') else None,
-                                'created_at': datetime.utcnow(),
-                                'updated_at': datetime.utcnow()
-                            })
-                        except Exception as e:
-                            self._log(f"单条文件数据校验异常: {file} - {str(e)}")
-                            continue
-                    if valid_files:
-                        try:
-                            file_insert_stmt = insert(FileRecord).values(valid_files)
-                            file_do_nothing_stmt = file_insert_stmt.on_conflict_do_nothing(
-                                index_elements=['project_id', 'chatroom_name', 'original_name']
-                            )
-                            file_insert_result = db.session.execute(file_do_nothing_stmt)
-                            db.session.commit()
-                            try:
-                                inserted_file_count = file_insert_result.rowcount if hasattr(file_insert_result, 'rowcount') else len(valid_files)
-                            except:
-                                inserted_file_count = len(valid_files)
-                            total_files += inserted_file_count
-                            all_new_files.extend(valid_files)
-                            self._log(f"群聊 {group_name} 批量入库文件 {inserted_file_count} 条（已自动跳过异常和重复文件）。")
-                        except Exception as e:
-                            db.session.rollback()
-                            self._log(f"文件批量入库失败: {e}")
-                
+                    all_new_files.extend(file_records)
                 self._log(f"群聊 {group_name} 处理完成。")
-            
-            self._log(f"全部群聊同步完成。共入库消息 {total_messages} 条，文件 {total_files} 条。")
-
-            # === 自动生成 WorkloadRecord ===
-            from backend.models.workload import WorkloadRecord
-            from backend.models.employee import EmployeeMapping
-            from backend.models.file import FileRecord
-            from backend.models.chat import ChatMessage
-            from backend.db import db
-            from datetime import datetime
-            # 简单规则：每条消息和文件都生成一条工作量记录
-            employees = {e.real_name: e.id for e in EmployeeMapping.query.all()}
-            # 消息
-            for msg in ChatMessage.query.filter_by(project_id=self.project_id).all():
-                emp_id = employees.get(msg.sender_name)
-                if not emp_id:
-                    continue
-                exists = WorkloadRecord.query.filter_by(
-                    employee_id=emp_id,
-                    project_id=self.project_id,
-                    date=msg.timestamp.date(),
-                    output_type='消息',
-                    output_value=str(msg.id)
-                ).first()
-                if exists:
-                    continue
-                record = WorkloadRecord(
-                    employee_id=emp_id,
-                    project_id=self.project_id,
-                    date=msg.timestamp.date(),
-                    role='文案',
-                    output_type='消息',
-                    output_value=str(msg.id),
-                    we_value=1.0,
-                    related_message_id=str(msg.id),
-                    created_at=datetime.utcnow()
-                )
-                db.session.add(record)
-            # 文件
-            for f in FileRecord.query.filter_by(project_id=self.project_id).all():
-                emp_id = employees.get(f.uploader)
-                if not emp_id:
-                    continue
-                exists = WorkloadRecord.query.filter_by(
-                    employee_id=emp_id,
-                    project_id=self.project_id,
-                    date=f.upload_time.date() if f.upload_time else datetime.utcnow().date(),
-                    output_type='文件',
-                    output_value=str(f.id)
-                ).first()
-                if exists:
-                    continue
-                record = WorkloadRecord(
-                    employee_id=emp_id,
-                    project_id=self.project_id,
-                    date=f.upload_time.date() if f.upload_time else datetime.utcnow().date(),
-                    role='设计',
-                    output_type='文件',
-                    output_value=str(f.id),
-                    we_value=1.0,
-                    related_file_id=f.id,
-                    created_at=datetime.utcnow()
-                )
-                db.session.add(record)
-            db.session.commit()
-            self._log("自动生成 WorkloadRecord 完成。")
-
-            # === 自动生成 ProjectHealthStats ===
-            try:
-                from backend.scripts.fix_project_health_stats import main as health_stats_main
-                health_stats_main(project_id=self.project_id)
-                self._log("自动生成 ProjectHealthStats 完成。")
-            except Exception as e:
-                self._log(f"自动生成 ProjectHealthStats 失败: {e}")
-
-            return {
+            self._log(f"全部群聊同步完成。共解析消息 {len(all_new_msgs)} 条，文件 {len(all_new_files)} 条。")
+            result = {
                 'success': True,
-                'message': f'同步完成，消息 {total_messages} 条，文件 {total_files} 条',
-                'total_messages': total_messages,
-                'total_files': total_files,
+                'chat_messages': all_new_msgs,
+                'file_records': all_new_files,
                 'logs': []
             }
-            
+            logger.info(f"[chatlog_processor] 返回 file_records 数量: {len(all_new_files)}")
+            return result
         except Exception as e:
-            self._log(f"同步过程发生异常: {e}\n{traceback.format_exc()}")
-            db.session.rollback()
-            return {'success': False, 'message': f'同步异常: {e}', 'logs': []}
+            self._log(f"同步项目聊天记录时发生严重错误: {e}")
+            return {'success': False, 'message': str(e), 'logs': []}
     
     def _associate_employee(self, sender_name: str, group_type: str = 'unknown') -> Tuple[Optional[int], str]:
         if not sender_name:
@@ -597,21 +409,35 @@ class ChatLogProcessor:
         # === 计算WE值 ===
         we_value = self.calculate_we_value(role, output_type, business_unit, is_final, is_iteration, quantity)
 
+        # 新增：补全所有 file_records 业务字段
         return {
             'project_id': self.project_id,
-            'filename': filename,
-            'uploader_id': employee_id,
-            'uploader_role': role,
+            'original_name': filename,
+            'standardized_name': filename,  # 可根据需要标准化
+            'project_name': components.get('project_name', ''),
+            'work_order': components.get('work_order', ''),
+            'workload': components.get('workload', ''),
+            'author_abbreviation': components.get('author_abbreviation', ''),
+            'version': components.get('version', ''),
+            'file_extension': components.get('extension', ''),
             'upload_time': timestamp,
-            'file_type': components.get('extension'),
-            'group_name': group_info.get('name'),
-            'group_type': group_info.get('type'),
-            'is_standard_format': components.get('is_standard_format'),
-            'parsed_project_name': components.get('project_name'),
-            'parsed_date': components.get('date'),
-            'parsed_author_abbreviation': components.get('author_abbreviation'),
-            'parsed_version': components.get('version'),
-            # V2模型统计字段
+            'uploader': employee_id,  # 可根据实际需求填微信昵称或id
+            'file_size': None,  # 需后续补全
+            'file_md5': '',    # 需后续补全
+            'file_path': '',   # 需后续补全
+            'status': 'pending',
+            'file_type': output_type,
+            'file_category': '',  # 可根据业务规则补全
+            'tags': '',
+            'is_archived': False,
+            'archive_path': '',
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow(),
+            'duration_hours': None,
+            'employee_id': employee_id,
+            'chatroom_name': group_info.get('name', ''),
+            'message_seq': parsed_message.get('seq', ''),
+            # 其他统计字段
             'output_type': output_type,
             'business_unit': business_unit,
             'is_final': is_final,
@@ -690,17 +516,58 @@ class ChatLogProcessor:
             parsed_message = self.parser.parse_message(message)
             sender_name = parsed_message.get('sender_name')
             
-            employee_id, role = self._associate_employee(sender_name, group_info['type'])
+            emp = self.identity_service.identify_employee(sender_name)
+            if emp:
+                # 内部员工，正常处理
+                employee_id, role = self._associate_employee(sender_name, group_info['type'])
 
-            # 创建聊天消息记录
-            chat_record = self._create_chat_message(parsed_message, employee_id, role)
-            new_messages.append(chat_record)
-            
-            # 如果是文件，创建文件记录
-            if parsed_message.get('parsed_content', {}).get('filename'):
-                file_record = self._create_file_record(parsed_message, employee_id, role, group_info)
-                if file_record:
-                    new_files.append(file_record)
+                # 创建聊天消息记录
+                chat_record = self._create_chat_message(parsed_message, employee_id, role)
+                new_messages.append(chat_record)
+                
+                # 如果是文件，创建文件记录
+                if parsed_message.get('parsed_content', {}).get('filename'):
+                    file_record = self._create_file_record(parsed_message, employee_id, role, group_info)
+                    if file_record:
+                        new_files.append(file_record)
+            else:
+                # 外部客户：尝试通过 sender_name 在员工表模糊匹配 employee_id
+                from backend.models.employee import EmployeeMapping
+                def norm(s):
+                    return str(s).strip().lower() if s else ''
+                employees = EmployeeMapping.query.all()
+                u = norm(sender_name)
+                emp_match = None
+                for e in employees:
+                    if u in norm(e.wechat_nickname) or u in norm(e.real_name) or u in norm(e.name_abbreviation):
+                        emp_match = e
+                        break
+                if emp_match:
+                    employee_id = emp_match.id
+                    role = emp_match.role
+                else:
+                    # 若找不到，创建一个"外部客户"员工（可选，或指定一个默认外部客户id）
+                    # 这里假设有一个名为"外部客户"的员工，若没有请先在员工表创建
+                    external_emp = EmployeeMapping.query.filter_by(real_name='外部客户').first()
+                    if not external_emp:
+                        # 自动创建外部客户员工
+                        external_emp = EmployeeMapping(
+                            wechat_nickname='外部客户',
+                            real_name='外部客户',
+                            position='客户',
+                            name_abbreviation='KHH',
+                            role='外部客户'
+                        )
+                        from backend.db import db
+                        db.session.add(external_emp)
+                        db.session.commit()
+                    employee_id = external_emp.id
+                    role = external_emp.role
+                # 只处理文件
+                if parsed_message.get('parsed_content', {}).get('filename'):
+                    file_record = self._create_file_record(parsed_message, employee_id, role, group_info)
+                    if file_record:
+                        new_files.append(file_record)
 
         self._log(f"处理完成：消息 {len(new_messages)} 条，文件 {len(new_files)} 条")
         return {

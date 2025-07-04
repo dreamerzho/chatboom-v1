@@ -74,8 +74,8 @@ if __name__ == "__main__":
     with engine.connect() as conn:
         trans = conn.begin()
         try:
-        fix_file_records_upload_time(conn)
-        batch_insert_workload_records(conn)
+            fix_file_records_upload_time(conn)
+            batch_insert_workload_records(conn)
             trans.commit()
         except Exception as e:
             print(f"[ERROR] 数据写入异常: {e}")

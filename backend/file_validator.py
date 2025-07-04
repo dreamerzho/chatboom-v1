@@ -18,10 +18,9 @@ class FileNameValidator:
         """
         初始化文件名验证器
         """
-        # 文件名规范的正则表达式
-        # 格式：[YYMMDD]-[项目名]-[工单名/内容描述]-[工作量]-[作者缩写]-[版本号].扩展名
+        # 支持6位、7位、8位日期
         self.pattern = re.compile(
-            r'^(\d{6})-([^-]+)-([^-]+)-([^-]+)-([A-Za-z]{2,})-([Vv]\d+)\.([^.]+)$'
+            r'^(\d{6}|\d{7}|\d{8})-([^-]+)-([^-]+)-([^-]+)-([A-Za-z]{2,})-([Vv]\d+)\.([^.]+)$'
         )
         
         # 支持的文件扩展名
@@ -55,10 +54,39 @@ class FileNameValidator:
             match = self.pattern.match(clean_filename)
             
             if not match:
+                # 检查是否为7位日期，自动修正为8位
+                m7 = re.match(r'^(\d{7})-([^-]+)-([^-]+)-([^-]+)-([A-Za-z]{2,})-([Vv]\d+)\.([^.]+)$', clean_filename)
+                if m7:
+                    date7 = m7.group(1)
+                    # 规则：2506027→20250627（前2位为年，后6位为月日）
+                    if len(date7) == 7:
+                        date8 = '20' + date7[0:2] + date7[2:]
+                        fixed_name = clean_filename.replace(date7, date8, 1)
+                        match = self.pattern.match(fixed_name)
+                        if match:
+                            # 自动修正通过，返回修正后的结果
+                            date_code, project_name, work_order, workload, author, version, extension = match.groups()
+                            return {
+                                'is_compliant': True,
+                                'filename': fixed_name,
+                                'parsed_info': {
+                                    'date_code': date8,
+                                    'project_name': project_name,
+                                    'work_order': work_order,
+                                    'workload': workload,
+                                    'author_abbreviation': author,
+                                    'version': version,
+                                    'extension': extension,
+                                    'date': self._parse_date_code(date8),
+                                    'formatted_date': self._format_date(date8)
+                                },
+                                'error': None,
+                                'suggestion': f'已自动修正7位日期为8位: {fixed_name}'
+                            }
                 return {
                     'is_compliant': False,
                     'filename': clean_filename,
-                    'error': '文件名格式不符合规范',
+                    'error': '文件名格式不符合规范（日期字段应为6/7/8位，或其它字段缺失）',
                     'suggestion': self._generate_suggestion(clean_filename)
                 }
             
@@ -115,7 +143,7 @@ class FileNameValidator:
         
         # 验证日期代码
         if not self._is_valid_date_code(date_code):
-            errors.append(f"日期代码 '{date_code}' 格式不正确，应为6位数字 (YYMMDD)")
+            errors.append(f"日期代码 '{date_code}' 格式不正确，应为6位数字 (YYMMDD)或8位数字 (YYYYMMDD)")
             suggestions.append("例如: 240115 表示 2024年1月15日")
         
         # 验证项目名
@@ -164,13 +192,18 @@ class FileNameValidator:
             date_code: 日期代码 (YYMMDD)
         返回: 是否为有效格式
         """
-        if not date_code.isdigit() or len(date_code) != 6:
+        if not date_code.isdigit() or len(date_code) not in [6, 8]:
             return False
         
         try:
-            year = int(date_code[:2])
-            month = int(date_code[2:4])
-            day = int(date_code[4:6])
+            if len(date_code) == 6:
+                year = int(date_code[:2])
+                month = int(date_code[2:4])
+                day = int(date_code[4:6])
+            else:
+                year = int(date_code[:4])
+                month = int(date_code[4:6])
+                day = int(date_code[6:8])
             
             # 基本范围检查
             if year < 0 or year > 99:
@@ -226,9 +259,14 @@ class FileNameValidator:
         返回: datetime对象或None
         """
         try:
-            year = int(date_code[:2])
-            month = int(date_code[2:4])
-            day = int(date_code[4:6])
+            if len(date_code) == 6:
+                year = int(date_code[:2])
+                month = int(date_code[2:4])
+                day = int(date_code[4:6])
+            else:
+                year = int(date_code[:4])
+                month = int(date_code[4:6])
+                day = int(date_code[6:8])
             
             # 处理年份
             full_year = 2000 + year if year < 50 else 1900 + year

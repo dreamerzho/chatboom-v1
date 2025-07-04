@@ -677,15 +677,36 @@ def get_project_health(project_id):
 
 @projects_bp.route('/<int:project_id>/files', methods=['GET'])
 def get_project_files(project_id):
-    """返回指定项目的文件列表"""
+    """返回指定项目的文件列表，uploader 优先返回微信昵称，支持多字段匹配"""
     files = FileRecord.query.filter_by(project_id=project_id).all()
-    file_list = [f.to_dict() for f in files]
+    employees = EmployeeMapping.query.all()
+    emp_id_map = {e.id: e.wechat_nickname for e in employees}
+    emp_realname_map = {e.real_name: e.wechat_nickname for e in employees}
+    emp_abbr_map = {e.name_abbreviation: e.wechat_nickname for e in employees}
+    emp_nickname_map = {e.wechat_nickname: e.wechat_nickname for e in employees}
+    file_list = []
+    for f in files:
+        uploader = None
+        if f.employee_id and f.employee_id in emp_id_map:
+            uploader = emp_id_map[f.employee_id]
+        elif f.uploader and f.uploader in emp_realname_map:
+            uploader = emp_realname_map[f.uploader]
+        elif f.uploader and f.uploader in emp_abbr_map:
+            uploader = emp_abbr_map[f.uploader]
+        elif f.uploader and f.uploader in emp_nickname_map:
+            uploader = emp_nickname_map[f.uploader]
+        else:
+            uploader = f.uploader
+        d = f.to_dict()
+        d['uploader'] = uploader
+        file_list.append(d)
     return jsonify({'success': True, 'data': file_list})
 
 @projects_bp.route('/<int:project_id>/overview', methods=['GET'])
 def get_project_overview(project_id):
     """
     聚合返回项目详情页所需全部数据，支持 period 参数（如 7d/30d/month/all）
+    优化文件列表uploader为微信昵称，支持多字段匹配
     """
     try:
         period = request.args.get('period', '30d')
@@ -772,6 +793,28 @@ def get_project_overview(project_id):
         ]
         recent_activities = sorted(recent_activities, key=lambda x: x['time'], reverse=True)[:10] if recent_activities else []
         # 9. 组装返回
+        files = FileRecord.query.filter_by(project_id=project_id).order_by(FileRecord.upload_time.desc()).limit(100).all()
+        employees = EmployeeMapping.query.all()
+        emp_id_map = {e.id: e.wechat_nickname for e in employees}
+        emp_realname_map = {e.real_name: e.wechat_nickname for e in employees}
+        emp_abbr_map = {e.name_abbreviation: e.wechat_nickname for e in employees}
+        emp_nickname_map = {e.wechat_nickname: e.wechat_nickname for e in employees}
+        file_list = []
+        for f in files:
+            uploader = None
+            if f.employee_id and f.employee_id in emp_id_map:
+                uploader = emp_id_map[f.employee_id]
+            elif f.uploader and f.uploader in emp_realname_map:
+                uploader = emp_realname_map[f.uploader]
+            elif f.uploader and f.uploader in emp_abbr_map:
+                uploader = emp_abbr_map[f.uploader]
+            elif f.uploader and f.uploader in emp_nickname_map:
+                uploader = emp_nickname_map[f.uploader]
+            else:
+                uploader = f.uploader
+            d = f.to_dict()
+            d['uploader'] = uploader
+            file_list.append(d)
         overview = {
             'project': {
                 'id': project.id,
@@ -790,6 +833,7 @@ def get_project_overview(project_id):
             'risks': risks,
             'health': health,
             'recent_activities': recent_activities,
+            'files': file_list,
             'period': period
         }
         return jsonify({'success': True, 'data': overview})
@@ -807,7 +851,7 @@ def get_risk_level(health_score):
     elif health_score >= 50:
         return 'risk'
     else:
-        return 'critical'
+        return 'critical' 
 
 @projects_bp.route('/<int:project_id>/archive', methods=['POST'])
 def archive_project(project_id):

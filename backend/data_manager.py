@@ -49,20 +49,36 @@ class DataManager:
         self.analysis_service = AnalysisService()
         
     def sync_project_data(self,
-                          project_id: int,
-                          force_resync: bool = False) -> Dict[str, Any]:
+                         project_id: int,
+                         start_time: str = None,
+                         end_time: str = None,
+                         chatroom_names: list = None,
+                         sync_type: str = None,
+                         force: bool = False,
+                         force_resync: bool = False) -> Dict[str, Any]:
         """
         同步项目数据（统一入口）- 已重构
-        此方法现在是 chatlog_integration.sync_project_chatlogs 的一个简单代理
+        兼容所有API参数风格，全部透传给 chatlog_integration
         """
         try:
             logger.info(f"DataManager: 开始为项目ID {project_id} 调用同步流程...")
-
-            # 完全委托给 chatlog_integration 来处理
+            # 兼容 force/force_resync
+            force_flag = force or force_resync
             sync_result = self.chatlog_integration.sync_project_chatlogs(
                 project_id=project_id,
-                force_resync=force_resync
+                start_time=start_time,
+                end_time=end_time,
+                chatroom_names=chatroom_names,
+                sync_type=sync_type,
+                force_resync=force_flag
             )
+            # 新增链路日志
+            logger.info(f"[同步链路] sync_result keys: {list(sync_result.keys())}")
+            file_records = sync_result.get('file_records', [])
+            logger.info(f"[同步链路] file_records 数量: {len(file_records)}")
+            if file_records:
+                import json
+                logger.info(f"[同步链路] file_records 前3条: {json.dumps(file_records[:3], ensure_ascii=False, default=str)}")
             # 新增：同步完成后自动归档资产
             if sync_result.get('success'):
                 project = Project.query.get(project_id)
@@ -72,10 +88,9 @@ class DataManager:
                     # 自动归档资产
                     self._save_sync_results(project, sync_result)
                     logger.info(f"DataManager: 项目ID {project_id} 的资产已自动归档。");
-
             return {
                 'success': sync_result.get('success', False),
-                'data': sync_result
+                'sync_result': sync_result
             }
         except Exception as e:
             logger.error(f"DataManager: 同步项目ID {project_id} 数据失败: {e}", exc_info=True)
@@ -136,109 +151,70 @@ class DataManager:
         """
         保存同步结果到数据库，使用新的 Asset 模型替代 FileRecord
         优化：每条数据独立异常处理，字段校验，唯一性校验。
+        增加详细日志，字段为空时用文件名兜底，确保所有文件都能入库。
         """
         file_success, file_fail = 0, 0
-        for file_data in sync_result.get('file_records', []):
+        file_records = sync_result.get('file_records', [])
+        logger.info(f"[入库链路] 进入 _save_sync_results, file_records 数量: {len(file_records)}")
+        if file_records:
+            import json
+            logger.info(f"[入库链路] file_records 前3条: {json.dumps(file_records[:3], ensure_ascii=False, default=str)}")
+        for idx, file_data in enumerate(file_records):
             try:
-                # 字段校验与默认值
-                original_name = file_data.get('original_name', '') or ''
+                # 字段校验与默认值，字段为空时用 original_name 兜底
+                original_name = file_data.get('original_name', '') or file_data.get('filename', '') or ''
                 file_md5 = file_data.get('file_md5', '') or ''
                 file_extension = file_data.get('file_extension', '') or ''
                 file_size = file_data.get('file_size', 0) or 0
                 employee_id = file_data.get('employee_id') if file_data.get('employee_id') else None
-                upload_time_str = file_data.get('upload_time', '')
-                try:
-                    upload_time = datetime.fromisoformat(upload_time_str) if upload_time_str else datetime.utcnow()
-                except Exception:
+                uploader = file_data.get('uploader', '') or ''
+                if isinstance(uploader, int):
+                    uploader = ''
+                upload_time = file_data.get('upload_time')
+                if isinstance(upload_time, str):
+                    try:
+                        upload_time = datetime.fromisoformat(upload_time)
+                    except Exception:
+                        upload_time = datetime.utcnow()
+                elif not isinstance(upload_time, datetime):
                     upload_time = datetime.utcnow()
                 version = file_data.get('version', '') or ''
-                # 唯一性校验（file_md5+project_id）
-                if file_md5 and Asset.query.filter_by(file_md5=file_md5, project_id=project.id).first():
-                    logger.info(f"跳过重复文件: {original_name} (md5={file_md5})")
-                    continue
-                # 解析文件名
-                filename = original_name
-                parsed_data = self.parser_service.parse(filename)
-                if parsed_data:
-                    asset = Asset(
-                        original_name=original_name,
-                        file_path=file_data.get('file_path', ''),
-                        file_size=file_size,
-                        file_md5=file_md5,
-                        file_extension=parsed_data.file_extension or file_extension,
-                        file_type=self._determine_file_type(parsed_data.file_extension),
-                        file_category=self._determine_file_category(parsed_data.file_extension),
-                        task_identifier=parsed_data.task_identifier,
-                        submission_date=parsed_data.submission_date,
-                        version=parsed_data.version,
-                        workload_amount=parsed_data.workload_amount,
-                        author_abbreviation=parsed_data.author_abbreviation,
-                        author_id=employee_id,
+                chatroom_name = file_data.get('chatroom_name', '')
+                # 唯一性校验（project_id, chatroom_name, original_name）
+                if original_name and project.id and chatroom_name:
+                    exists = FileRecord.query.filter_by(
                         project_id=project.id,
-                        chatroom_name=file_data.get('chatroom_name', ''),
-                        message_seq=file_data.get('message_seq', ''),
-                        uploader=file_data.get('uploader', ''),
-                        upload_time=upload_time,
-                        status='compliant' if parsed_data.is_compliant else 'non_compliant',
-                        tags=json.dumps({
-                            'project_name': parsed_data.project_name,
-                            'work_order': parsed_data.work_order
-                        }) if parsed_data.project_name or parsed_data.work_order else None
-                    )
-                    asset.workload_equivalent = self.analysis_service.calculate_workload_equivalent(asset)
-                    asset.task_group_id = self.parser_service.generate_task_group_id(
-                        parsed_data.project_name or project.project_name,
-                        parsed_data.task_identifier,
-                        parsed_data.author_abbreviation
-                    )
-                    asset.is_final_version = 'final' in filename.lower() or '最终' in filename
-                    db.session.add(asset)
-                    # 同步 FileRecord
-                    file_record = FileRecord(
-                        original_name=original_name,
-                        standardized_name=file_data.get('standardized_name', ''),
-                        project_name=file_data.get('project_name', ''),
-                        work_order=file_data.get('work_order', ''),
-                        workload=file_data.get('workload', ''),
-                        author_abbreviation=file_data.get('author_abbreviation', ''),
-                        version=version,
-                        file_extension=file_extension,
-                        upload_time=upload_time,
-                        uploader=file_data.get('uploader', ''),
-                        file_size=file_size,
-                        status=file_data.get('status', 'pending'),
-                        chatroom_name=file_data.get('chatroom_name', ''),
-                        message_seq=file_data.get('message_seq', ''),
-                        employee_id=employee_id,
-                        project_id=project.id
-                    )
-                    db.session.add(file_record)
-                    self._generate_workload_record(file_record, project, parsed_data)
-                    file_success += 1
-                else:
-                    logger.warning(f"文件名解析失败: {filename}")
-                    file_record = FileRecord(
-                        original_name=original_name,
-                        standardized_name=file_data.get('standardized_name', ''),
-                        project_name=file_data.get('project_name', ''),
-                        work_order=file_data.get('work_order', ''),
-                        workload=file_data.get('workload', ''),
-                        author_abbreviation=file_data.get('author_abbreviation', ''),
-                        version=version,
-                        file_extension=file_extension,
-                        upload_time=upload_time,
-                        uploader=file_data.get('uploader', ''),
-                        file_size=file_size,
-                        status='non_compliant',
-                        chatroom_name=file_data.get('chatroom_name', ''),
-                        message_seq=file_data.get('message_seq', ''),
-                        employee_id=employee_id,
-                        project_id=project.id
-                    )
-                    db.session.add(file_record)
-                    file_fail += 1
+                        chatroom_name=chatroom_name,
+                        original_name=original_name
+                    ).first()
+                    if exists:
+                        logger.warning(f"唯一性冲突，跳过: project_id={project.id}, chatroom={chatroom_name}, name={original_name}")
+                        continue
+                file_record = FileRecord(
+                    original_name=original_name,
+                    standardized_name=file_data.get('standardized_name', '') or original_name,
+                    project_name=file_data.get('project_name', ''),
+                    work_order=file_data.get('work_order', '') or original_name,
+                    workload=file_data.get('workload', ''),
+                    author_abbreviation=file_data.get('author_abbreviation', ''),
+                    version=version,
+                    file_extension=file_extension,
+                    upload_time=upload_time,
+                    uploader=uploader,
+                    file_size=file_size,
+                    status=file_data.get('status', 'pending'),
+                    chatroom_name=chatroom_name,
+                    message_seq=file_data.get('message_seq', ''),
+                    employee_id=employee_id,
+                    project_id=project.id
+                )
+                db.session.add(file_record)
+                db.session.commit()  # 单条 commit，便于定位问题
+                self._generate_workload_record(file_record, project, None)
+                file_success += 1
             except Exception as e:
-                logger.error(f"单条文件数据入库异常: {file_data.get('original_name', '')} - {str(e)}")
+                import json, traceback
+                logger.error(f"第{idx+1}条文件数据入库异常: {json.dumps(file_data, ensure_ascii=False, default=str)}\n{traceback.format_exc()}")
                 file_fail += 1
                 db.session.rollback()
         # 聊天消息批量入库（保持原有逻辑）

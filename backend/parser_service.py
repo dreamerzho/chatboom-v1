@@ -103,17 +103,19 @@ class ParserService:
                 # 项目/任务
                 project = self._normalize_text(groups.get('project', '').strip())
                 desc = self._normalize_text(groups.get('desc', '').strip())
-                task_identifier = f"{project}-{desc}" if project and desc else desc
-                extra['project'] = project
-                extra['desc'] = desc
+                # 作者缩写
+                author_abbreviation = self._normalize_text(groups.get('author', '').strip()).upper()
+                # 合规判定优化：只要有项目名+（作者或日期或版本）任意一个即判为合规
+                has_project = bool(project)
+                has_author = bool(author_abbreviation)
+                has_date = bool(submission_date)
+                has_version = bool(version_str)
+                is_compliant = has_project and (has_author or has_date or has_version)
                 # 工作量
                 workload_amount = groups.get('workload')
                 if workload_amount:
                     workload_amount = self._normalize_workload(workload_amount)
                 extra['workload_amount'] = workload_amount
-                # 作者缩写
-                author_abbreviation = self._normalize_text(groups.get('author', '').strip()).upper()
-                extra['author_abbreviation'] = author_abbreviation
                 # 文件类型
                 ext = groups.get('ext', '').lower()
                 fname = match.string.lower()
@@ -136,14 +138,14 @@ class ParserService:
                     is_original = True
                 return ParsedAssetData(
                     submission_date=submission_date,
-                    task_identifier=task_identifier,
+                    task_identifier=f"{project}-{desc}" if project and desc else desc,
                     author_abbreviation=author_abbreviation,
                     version=version,
                     workload_amount=workload_amount,
                     project_name=project,
                     work_order=desc,
                     file_extension=ext,
-                    is_compliant=True,
+                    is_compliant=is_compliant,
                     is_valid=is_valid and not parse_errors,
                     is_original=is_original,
                     is_reference=is_reference,
@@ -209,6 +211,8 @@ class ParserService:
         # 记录所有可用原始信息
         extra['raw_filename'] = filename
         extra['raw_file_record'] = file_record
+        # 合规判定优化：只要有项目名+uploader也判为合规
+        is_compliant = bool(project) and bool(uploader)
         return ParsedAssetData(
             submission_date=submission_date,
             task_identifier=task_identifier,
@@ -218,7 +222,7 @@ class ParserService:
             project_name=project,
             work_order=desc,
             file_extension=ext,
-            is_compliant=False,
+            is_compliant=is_compliant,
             is_valid=False,
             is_original=is_original,
             is_reference=is_reference,

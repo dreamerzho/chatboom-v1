@@ -9,7 +9,6 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from urllib.parse import quote
-# from backend.chatlog_processor import ChatLogProcessor  # 移除顶部导入，避免循环依赖
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -323,37 +322,42 @@ class ChatlogIntegration:
     
     def sync_project_chatlogs(self,
                              project_id: int,
+                             start_time: str = None,
+                             end_time: str = None,
+                             chatroom_names: list = None,
+                             sync_type: str = None,
                              force_resync: bool = False) -> Dict[str, Any]:
         """
         为指定项目同步聊天记录 - 已重构为使用新的ChatLogProcessor
-        它现在是ChatLogProcessor的前端代理
+        兼容所有API参数风格，全部透传给 ChatLogProcessor
         """
         logger.info(f"开始为项目ID {project_id} 同步聊天记录...")
-        
-        # 定义一个简单的日志记录器，用于捕获来自处理器的日志
         sync_logs = []
         def capture_log(message: str):
             sync_logs.append(message)
             logger.info(f"[Sync Log - P{project_id}]: {message}")
-            
         try:
-            # 动态创建与项目绑定的处理器实例
-            # from backend.chatlog_processor import ChatLogProcessor  # 在需要用到 ChatLogProcessor 的方法内部再进行延迟导入（如有实际用到的地方）
-            processor = ChatLogProcessor(project_id=project_id, yield_log=capture_log)
-            
-            # 执行核心处理逻辑
-            result = processor.process_chatlogs()
-            
-            # 在返回结果中附加详细日志
+            from backend.chatlog_processor import ChatLogProcessor  # 移动到方法内部，避免循环依赖
+            processor = ChatLogProcessor(
+                project_id=project_id,
+                yield_log=capture_log
+            )
+            # 统一传递参数
+            result = processor.process_chatlogs(
+                start_time=start_time,
+                end_time=end_time,
+                chatroom_names=chatroom_names,
+                sync_type=sync_type,
+                force_resync=force_resync
+            )
             result['logs'] = sync_logs
-            
             if result.get('success'):
                 logger.info(f"项目ID {project_id} 同步成功。")
             else:
                 logger.warning(f"项目ID {project_id} 同步过程有警告或失败: {result.get('message', '无详细信息')}")
-
+            file_records = result.get('file_records', [])
+            logger.info(f"[chatlog_integration] 返回 file_records 数量: {len(file_records)}")
             return result
-
         except Exception as e:
             error_message = f"为项目ID {project_id} 同步聊天记录时发生严重错误: {e}"
             logger.error(error_message, exc_info=True)

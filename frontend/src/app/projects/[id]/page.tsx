@@ -102,6 +102,7 @@ interface ProjectDetail {
   chatContext?: { sender: string; time: string; content: string }[];
   recent_activities?: { type: string; title: string; description: string; time: string }[];
   risks?: { event_type: string; description: string; event_time: string }[];
+  files?: FileRecord[];
 }
 
 // 适配 weData，兼容后端多种结构
@@ -133,7 +134,6 @@ const ProjectDetailPage: React.FC = () => {
   const { id } = params;
   // 项目信息、文件列表、加载状态
   const [project, setProject] = useState<ProjectDetail | null>(null);
-  const [files] = useState<FileRecord[]>([]);
   const [healthTrendData, setHealthTrendData] = useState<{ week: string; rework_count: number; risk_count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +151,7 @@ const ProjectDetailPage: React.FC = () => {
     projectAPI.getProjectOverview(id, period)
       .then((res) => {
         if (res.success && res.data) {
-          const overview = res.data as { project: ProjectDetail; healthStats: { week: string; rework_count?: number; risk_count?: number; health_score?: number; negative_sentiment_rate?: number; warning_count?: number; }[] };
+          const overview = res.data as any;
           // === 自动修正核心指标栏和健康分 ===
           if (overview.healthStats && overview.healthStats.length > 0) {
             const stats = overview.healthStats[0];
@@ -166,13 +166,20 @@ const ProjectDetailPage: React.FC = () => {
               reason: `健康分：${stats.health_score ?? 0}`
             };
           }
-          setProject(overview.project as ProjectDetail);
-          setHealthTrendData((overview.healthStats || []).map(h => ({
+          setProject({
+            ...overview.project,
+            files: overview.files,
+            metrics: overview.project.metrics,
+            weData: overview.weData,
+            health: overview.health,
+            recent_activities: overview.recent_activities,
+            risks: overview.risks
+          });
+          setHealthTrendData((overview.healthStats || []).map((h: { week: string; rework_count?: number; risk_count?: number }) => ({
             week: h.week,
             rework_count: h.rework_count ?? 0,
             risk_count: h.risk_count ?? 0
           })));
-          // 文件列表如需可后续补充
         } else {
           throw new Error(res.error || '未获取到项目信息');
         }
@@ -302,7 +309,7 @@ const ProjectDetailPage: React.FC = () => {
 
       {/* 4. 文件列表卡片 */}
       <Card title="项目文件列表" style={{ marginBottom: 24 }}>
-        {files && files.length > 0 ? (
+        {project.files && project.files.length > 0 ? (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -315,7 +322,7 @@ const ProjectDetailPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {files.map(file => (
+              {project.files.map(file => (
                 <tr key={file.id} style={{ borderBottom: '1px solid #eee' }}>
                   <td>{file.original_name}</td>
                   <td>{file.version}</td>

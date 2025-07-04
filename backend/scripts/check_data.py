@@ -86,6 +86,21 @@ def batch_fix_file_records():
     files = FileRecord.query.all()
     update_count = 0
     for file in files:
+        # 自动补全关键字段（无论合规与否）
+        if not file.uploader:
+            file.uploader = 'SYSTEM'  # 默认填充
+        if not file.author_abbreviation:
+            match = re.search(r'-([A-Za-z]{2,3})-', file.original_name)
+            file.author_abbreviation = match.group(1).upper() if match else 'SYS'
+        if not file.work_order:
+            parts = file.original_name.split('-')
+            file.work_order = parts[2] if len(parts) > 2 else ''
+        if not file.workload:
+            match = re.search(r'(\d+)', file.original_name)
+            file.workload = match.group(1) if match else '1'
+        if not file.version:
+            match = re.search(r'[Vv](\d+)', file.original_name)
+            file.version = f'V{match.group(1)}' if match else 'V1'
         result = validator.validate_filename(file.original_name)
         if result['is_compliant']:
             file.status = 'compliant'
@@ -101,10 +116,6 @@ def batch_fix_file_records():
                 file.project_name = best_match
             else:
                 file.project_name = info['project_name']
-            file.work_order = info['work_order']
-            file.workload = info['workload']
-            file.author_abbreviation = info['author_abbreviation']
-            file.version = info['version']
         else:
             file.status = 'non_compliant'
         update_count += 1
@@ -200,6 +211,50 @@ def batch_fill_file_md5():
     db.session.commit()
     print(f"已补全{count}条FileRecord的file_md5字段")
 
+def batch_fix_file_records_employee_id():
+    """
+    批量修正 file_records 的 employee_id 字段，根据 uploader 字段与员工表多字段模糊匹配，并同步修正 uploader 字段为微信昵称
+    """
+    print("\n=== 批量修正 file_records.employee_id 字段（增强模糊匹配） ===")
+    session = db.session
+    employees = EmployeeMapping.query.all()
+    # 构建多种映射，全部小写、去空格
+    def norm(s):
+        return str(s).strip().lower() if s else ''
+    emp_realname_map = {norm(e.real_name): e for e in employees}
+    emp_abbr_map = {norm(e.name_abbreviation): e for e in employees}
+    emp_nickname_map = {norm(e.wechat_nickname): e for e in employees}
+    emp_id_map = {str(e.id): e for e in employees}
+    files = FileRecord.query.all()
+    update_count = 0
+    for file in files:
+        if file.employee_id:
+            continue  # 已有则跳过
+        u = norm(file.uploader)
+        emp = None
+        # 1. 精确匹配
+        if u in emp_realname_map:
+            emp = emp_realname_map[u]
+        elif u in emp_abbr_map:
+            emp = emp_abbr_map[u]
+        elif u in emp_nickname_map:
+            emp = emp_nickname_map[u]
+        # 2. uploader为数字，尝试用id查找
+        elif file.uploader in emp_id_map:
+            emp = emp_id_map[file.uploader]
+        # 3. 部分匹配
+        else:
+            for e in employees:
+                if u and (u in norm(e.real_name) or u in norm(e.name_abbreviation) or u in norm(e.wechat_nickname)):
+                    emp = e
+                    break
+        if emp:
+            file.employee_id = emp.id
+            file.uploader = emp.wechat_nickname  # 同步修正为微信昵称
+            update_count += 1
+    session.commit()
+    print(f"已批量修正 {update_count} 条 file_records 的 employee_id 字段，并同步修正 uploader 字段为微信昵称")
+
 if __name__ == '__main__':
     with app.app_context():
         batch_fix_file_records()
@@ -208,4 +263,6 @@ if __name__ == '__main__':
         if 'batch_import_assets_from_files' in sys.argv:
             batch_import_assets_from_files()
         if 'batch_fill_file_md5' in sys.argv:
-            batch_fill_file_md5() 
+            batch_fill_file_md5()
+        if 'batch_fix_file_records_employee_id' in sys.argv:
+            batch_fix_file_records_employee_id() 
