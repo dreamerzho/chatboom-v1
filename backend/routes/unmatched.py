@@ -14,8 +14,12 @@ def list_unmatched():
     """
     查询所有未匹配人员及其角色
     """
-    persons = UnmatchedPerson.query.all()
-    return jsonify({'success': True, 'data': [p.to_dict() for p in persons]})
+    try:
+        persons = UnmatchedPerson.query.all()
+        return jsonify({'success': True, 'data': [p.to_dict() for p in persons], 'message': None})
+    except Exception as e:
+        # logger.error(f"获取未匹配人员失败: {str(e)}") # Assuming logger is defined elsewhere
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @unmatched_bp.route('/<int:person_id>', methods=['PUT'])
 def update_unmatched(person_id):
@@ -24,7 +28,7 @@ def update_unmatched(person_id):
     """
     person = UnmatchedPerson.query.get(person_id)
     if not person:
-        return jsonify({'success': False, 'error': '未找到该人员'}), 404
+        return jsonify({'success': False, 'data': None, 'message': '未找到该人员'}), 404
     data = request.json
     role = data.get('role', person.role)
     remark = data.get('remark', person.remark)
@@ -49,6 +53,6 @@ def update_unmatched(person_id):
         # 从未匹配表中移除
         db.session.delete(person)
         db.session.commit()
-        return jsonify({'success': True, 'data': '已归集为员工并移除未匹配人员'})
+        return jsonify({'success': True, 'data': '已归集为员工并移除未匹配人员', 'message': None})
     db.session.commit()
-    return jsonify({'success': True, 'data': person.to_dict()}) 
+    return jsonify({'success': True, 'data': person.to_dict(), 'message': None}) 

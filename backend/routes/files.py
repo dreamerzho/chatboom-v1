@@ -71,23 +71,20 @@ def get_files():
             })
         
         files_list = files_list if isinstance(files_list, list) else []
-        return jsonify({
-            'success': True,
-            'data': {
-                'items': files_list,
-                'pagination': {
-                    'page': page,
-                    'per_page': per_page,
-                    'total': pagination.total,
-                    'pages': pagination.pages,
-                    'has_next': pagination.has_next,
-                    'has_prev': pagination.has_prev
-                }
+        return jsonify({'success': True, 'data': {
+            'items': files_list,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': pagination.total,
+                'pages': pagination.pages,
+                'has_next': pagination.has_next,
+                'has_prev': pagination.has_prev
             }
-        })
+        }, 'message': None})
     except Exception as e:
         logger.error(f"获取文件列表失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @files_bp.route('/stats', methods=['GET'])
 def get_files_stats():

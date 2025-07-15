@@ -31,16 +31,10 @@ def get_keyword_categories():
     """
     try:
         categories = KeywordCategory.query.filter_by(is_active=True).all()
-        return jsonify({
-            'success': True,
-            'data': [category.to_dict() for category in categories]
-        })
+        return jsonify({'success': True, 'data': [category.to_dict() for category in categories], 'message': None})
     except Exception as e:
         logger.error(f"获取关键词分类失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/categories', methods=['POST'])
 def create_keyword_category():
@@ -60,10 +54,7 @@ def create_keyword_category():
         
         # 验证必填参数
         if not data or 'name' not in data:
-            return jsonify({
-                'success': False,
-                'error': '缺少必填参数: name'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': '缺少必填参数: name'}), 400
         
         name = data['name']
         description = data.get('description', '')
@@ -72,10 +63,7 @@ def create_keyword_category():
         # 检查分类名是否已存在
         existing = KeywordCategory.query.filter_by(name=name).first()
         if existing:
-            return jsonify({
-                'success': False,
-                'error': f'分类名 "{name}" 已存在'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': f'分类名 "{name}" 已存在'}), 400
         
         # 创建新分类
         category = KeywordCategory(
@@ -90,19 +78,12 @@ def create_keyword_category():
         # 刷新分析器缓存
         keyword_analyzer.refresh_keywords_cache()
         
-        return jsonify({
-            'success': True,
-            'message': f'关键词分类 "{name}" 创建成功',
-            'data': category.to_dict()
-        })
+        return jsonify({'success': True, 'data': category.to_dict(), 'message': f'关键词分类 "{name}" 创建成功'})
         
     except Exception as e:
         logger.error(f"创建关键词分类失败: {str(e)}")
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/categories/<int:category_id>', methods=['PUT'])
 def update_keyword_category(category_id: int):
@@ -124,17 +105,11 @@ def update_keyword_category(category_id: int):
     try:
         category = KeywordCategory.query.get(category_id)
         if not category:
-            return jsonify({
-                'success': False,
-                'error': f'分类ID {category_id} 不存在'
-            }), 404
+            return jsonify({'success': False, 'data': None, 'message': f'分类ID {category_id} 不存在'}), 404
         
         data = request.get_json()
         if not data:
-            return jsonify({
-                'success': False,
-                'error': '请求体不能为空'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': '请求体不能为空'}), 400
         
         # 更新字段
         if 'name' in data:
@@ -144,10 +119,7 @@ def update_keyword_category(category_id: int):
                 KeywordCategory.id != category_id
             ).first()
             if existing:
-                return jsonify({
-                    'success': False,
-                    'error': f'分类名 "{data["name"]}" 已存在'
-                }), 400
+                return jsonify({'success': False, 'data': None, 'message': f'分类名 "{data["name"]}" 已存在'}), 400
             category.name = data['name']
         
         if 'description' in data:
@@ -165,19 +137,12 @@ def update_keyword_category(category_id: int):
         # 刷新分析器缓存
         keyword_analyzer.refresh_keywords_cache()
         
-        return jsonify({
-            'success': True,
-            'message': f'关键词分类更新成功',
-            'data': category.to_dict()
-        })
+        return jsonify({'success': True, 'data': category.to_dict(), 'message': '关键词分类更新成功'})
         
     except Exception as e:
         logger.error(f"更新关键词分类失败: {str(e)}")
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/keywords', methods=['GET'])
 def get_keywords():
@@ -210,17 +175,11 @@ def get_keywords():
         
         keywords = query.order_by(Keyword.keyword).all()
         
-        return jsonify({
-            'success': True,
-            'data': [keyword.to_dict() for keyword in keywords]
-        })
+        return jsonify({'success': True, 'data': [keyword.to_dict() for keyword in keywords], 'message': None})
         
     except Exception as e:
-        logger.error(f"获取关键词列表失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        logger.error(f"获取关键词失败: {str(e)}")
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/keywords', methods=['POST'])
 def create_keyword():
@@ -243,10 +202,7 @@ def create_keyword():
         required_fields = ['keyword', 'category_id']
         for field in required_fields:
             if field not in data:
-                return jsonify({
-                    'success': False,
-                    'error': f'缺少必填参数: {field}'
-                }), 400
+                return jsonify({'success': False, 'data': None, 'message': f'缺少必填参数: {field}'}), 400
         
         keyword_text = data['keyword']
         category_id = data['category_id']
@@ -256,18 +212,12 @@ def create_keyword():
         # 验证分类是否存在
         category = KeywordCategory.query.get(category_id)
         if not category:
-            return jsonify({
-                'success': False,
-                'error': f'分类ID {category_id} 不存在'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': f'分类ID {category_id} 不存在'}), 400
         
         # 检查关键词是否已存在
         existing = Keyword.query.filter_by(keyword=keyword_text).first()
         if existing:
-            return jsonify({
-                'success': False,
-                'error': f'关键词 "{keyword_text}" 已存在'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': f'关键词 "{keyword_text}" 已存在'}), 400
         
         # 创建新关键词
         keyword = Keyword(
@@ -283,19 +233,12 @@ def create_keyword():
         # 刷新分析器缓存
         keyword_analyzer.refresh_keywords_cache()
         
-        return jsonify({
-            'success': True,
-            'message': f'关键词 "{keyword_text}" 创建成功',
-            'data': keyword.to_dict()
-        })
+        return jsonify({'success': True, 'data': keyword.to_dict(), 'message': f'关键词 "{keyword_text}" 创建成功'})
         
     except Exception as e:
         logger.error(f"创建关键词失败: {str(e)}")
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/keywords/<int:keyword_id>', methods=['PUT'])
 def update_keyword(keyword_id: int):
@@ -318,17 +261,11 @@ def update_keyword(keyword_id: int):
     try:
         keyword = Keyword.query.get(keyword_id)
         if not keyword:
-            return jsonify({
-                'success': False,
-                'error': f'关键词ID {keyword_id} 不存在'
-            }), 404
+            return jsonify({'success': False, 'data': None, 'message': f'关键词ID {keyword_id} 不存在'}), 404
         
         data = request.get_json()
         if not data:
-            return jsonify({
-                'success': False,
-                'error': '请求体不能为空'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': '请求体不能为空'}), 400
         
         # 更新字段
         if 'keyword' in data:
@@ -338,20 +275,14 @@ def update_keyword(keyword_id: int):
                 Keyword.id != keyword_id
             ).first()
             if existing:
-                return jsonify({
-                    'success': False,
-                    'error': f'关键词 "{data["keyword"]}" 已存在'
-                }), 400
+                return jsonify({'success': False, 'data': None, 'message': f'关键词 "{data["keyword"]}" 已存在'}), 400
             keyword.keyword = data['keyword']
         
         if 'category_id' in data:
             # 验证分类是否存在
             category = KeywordCategory.query.get(data['category_id'])
             if not category:
-                return jsonify({
-                    'success': False,
-                    'error': f'分类ID {data["category_id"]} 不存在'
-                }), 400
+                return jsonify({'success': False, 'data': None, 'message': f'分类ID {data["category_id"]} 不存在'}), 400
             keyword.category_id = data['category_id']
         
         if 'weight' in data:
@@ -369,19 +300,12 @@ def update_keyword(keyword_id: int):
         # 刷新分析器缓存
         keyword_analyzer.refresh_keywords_cache()
         
-        return jsonify({
-            'success': True,
-            'message': f'关键词更新成功',
-            'data': keyword.to_dict()
-        })
+        return jsonify({'success': True, 'data': keyword.to_dict(), 'message': '关键词更新成功'})
         
     except Exception as e:
         logger.error(f"更新关键词失败: {str(e)}")
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/analyze', methods=['POST'])
 def analyze_text():
@@ -401,10 +325,7 @@ def analyze_text():
         data = request.get_json()
         
         if not data or 'text' not in data:
-            return jsonify({
-                'success': False,
-                'error': '缺少必填参数: text'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': '缺少必填参数: text'}), 400
         
         text = data['text']
         project_id = data.get('project_id')
@@ -417,24 +338,18 @@ def analyze_text():
         # 关键词提取
         extracted_keywords = keyword_analyzer.extract_keywords(text, top_k=10)
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'text': text,
-                'sentiment': sentiment_result,
-                'keywords': extracted_keywords,
-                'project_id': project_id,
-                'employee_id': employee_id,
-                'chatroom_name': chatroom_name
-            }
-        })
+        return jsonify({'success': True, 'data': {
+            'text': text,
+            'sentiment': sentiment_result,
+            'keywords': extracted_keywords,
+            'project_id': project_id,
+            'employee_id': employee_id,
+            'chatroom_name': chatroom_name
+        }, 'message': None})
         
     except Exception as e:
         logger.error(f"文本分析失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/analyze/messages', methods=['POST'])
 def analyze_messages():
@@ -454,10 +369,7 @@ def analyze_messages():
         data = request.get_json()
         
         if not data or 'messages' not in data:
-            return jsonify({
-                'success': False,
-                'error': '缺少必填参数: messages'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': '缺少必填参数: messages'}), 400
         
         messages = data['messages']
         project_id = data.get('project_id')
@@ -465,10 +377,7 @@ def analyze_messages():
         chatroom_name = data.get('chatroom_name')
         
         if not isinstance(messages, list):
-            return jsonify({
-                'success': False,
-                'error': 'messages 必须是数组'
-            }), 400
+            return jsonify({'success': False, 'data': None, 'message': 'messages 必须是数组'}), 400
         
         # 批量分析
         result = keyword_analyzer.analyze_messages(
@@ -485,10 +394,7 @@ def analyze_messages():
         
     except Exception as e:
         logger.error(f"批量分析消息失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/analysis/history', methods=['GET'])
 def get_analysis_history():
@@ -514,17 +420,11 @@ def get_analysis_history():
             days=days
         )
         
-        return jsonify({
-            'success': True,
-            'data': analyses
-        })
+        return jsonify({'success': True, 'data': analyses, 'message': None})
         
     except Exception as e:
         logger.error(f"获取分析历史失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/analysis/trend', methods=['GET'])
 def get_trend_analysis():
@@ -557,10 +457,7 @@ def get_trend_analysis():
         
     except Exception as e:
         logger.error(f"获取趋势分析失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @keywords_bp.route('/init-default', methods=['POST'])
 def init_default_keywords():
@@ -627,19 +524,12 @@ def init_default_keywords():
         # 刷新分析器缓存
         keyword_analyzer.refresh_keywords_cache()
         
-        return jsonify({
-            'success': True,
-            'message': f'默认关键词库初始化成功，创建了 {created_count} 个关键词',
-            'data': {
-                'categories_created': len(default_categories),
-                'keywords_created': created_count
-            }
-        })
+        return jsonify({'success': True, 'data': {
+            'categories_created': len(default_categories),
+            'keywords_created': created_count
+        }, 'message': f'默认关键词库初始化成功，创建了 {created_count} 个关键词'})
         
     except Exception as e:
         logger.error(f"初始化默认关键词库失败: {str(e)}")
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': f'服务器内部错误: {str(e)}'
-        }), 500 
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500 

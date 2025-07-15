@@ -48,9 +48,9 @@ def get_projects():
                 'negative_feedback_count': d['negative_feedback_count'],
                 'last_updated': d['last_updated']
             })
-        return jsonify({'success': True, 'data': project_list})
+        return jsonify({'success': True, 'data': project_list, 'message': None})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @projects_bp.route('/', methods=['POST'])
 def create_project():
@@ -64,17 +64,17 @@ def create_project():
         logger.info(f"[create_project] 收到原始数据: {data}, 类型: {type(data)}")
         if not data:
             logger.error(f"[create_project] data为空，request.data={request.data}, request.form={request.form}, request.content_type={request.content_type}")
-            return jsonify({'success': False, 'error': '缺少请求数据'}), 400
+            return jsonify({'success': False, 'data': None, 'message': '缺少请求数据'}), 400
         
         # 验证必填字段
         if 'project_name' not in data or not data['project_name']:
-            return jsonify({'success': False, 'error': '缺少项目名称'}), 400
+            return jsonify({'success': False, 'data': None, 'message': '缺少项目名称'}), 400
         
         # 检查是否已存在相同名称的项目
         existing_project = Project.query.filter_by(project_name=data['project_name']).first()
         logger.info(f"[create_project] 唯一性校验: project_name={data['project_name']}，existing_project={existing_project}")
         if existing_project:
-            return jsonify({'success': False, 'error': '项目名称已存在'}), 400
+            return jsonify({'success': False, 'data': None, 'message': '项目名称已存在'}), 400
         
         # 兼容前端多余字段，保证description/status有默认值
         description = data.get('description', '')
@@ -136,7 +136,7 @@ def create_project():
         import traceback
         tb = traceback.format_exc()
         logger.error(f"创建项目失败: {str(e)}\n{tb}")
-        return jsonify({'success': False, 'error': str(e), 'traceback': tb}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e), 'traceback': tb}), 500
 
 @projects_bp.route('/<int:project_id>', methods=['GET'])
 def get_project(project_id):
@@ -148,7 +148,7 @@ def get_project(project_id):
     try:
         project = Project.query.get(project_id)
         if not project:
-            return jsonify({'success': False, 'error': '项目不存在'}), 404
+            return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
         chatrooms = ProjectChatroom.query.filter_by(project_id=project_id).all()
         internal_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '内部群聊']
         external_chat_groups = [c.chatroom_name for c in chatrooms if c.chatroom_type == '外部群聊']
@@ -328,7 +328,7 @@ def get_project(project_id):
         return jsonify({'success': True, 'data': project_data})
     except Exception as e:
         logger.error(f"获取项目详情失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @projects_bp.route('/<int:project_id>', methods=['PUT'])
 def update_project(project_id):
@@ -342,11 +342,11 @@ def update_project(project_id):
         data = request.get_json()
         logger.info(f"[update_project] 收到数据: {data}")
         if not data:
-            return jsonify({'success': False, 'error': '缺少请求数据'}), 400
+            return jsonify({'success': False, 'data': None, 'message': '缺少请求数据'}), 400
         
         project = Project.query.get(project_id)
         if not project:
-            return jsonify({'success': False, 'error': '项目不存在'}), 404
+            return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
         
         # 更新字段
         if 'project_name' in data:
@@ -410,7 +410,7 @@ def update_project(project_id):
         })
     except Exception as e:
         logger.error(f"更新项目失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @projects_bp.route('/<int:project_id>', methods=['DELETE'])
 def delete_project(project_id):
@@ -422,7 +422,7 @@ def delete_project(project_id):
     try:
         project = Project.query.get(project_id)
         if not project:
-            return jsonify({'success': False, 'error': '项目不存在'}), 404
+            return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
         
         db.session.delete(project)
         db.session.commit()
@@ -433,7 +433,7 @@ def delete_project(project_id):
         })
     except Exception as e:
         logger.error(f"删除项目失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @projects_bp.route('/<int:project_id>/chatrooms', methods=['POST'])
 def add_project_chatroom(project_id):
@@ -446,16 +446,16 @@ def add_project_chatroom(project_id):
     try:
         data = request.get_json()
         if not data:
-            return jsonify({'success': False, 'error': '缺少请求数据'}), 400
+            return jsonify({'success': False, 'data': None, 'message': '缺少请求数据'}), 400
         
         # 验证项目是否存在
         project = Project.query.get(project_id)
         if not project:
-            return jsonify({'success': False, 'error': '项目不存在'}), 404
+            return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
         
         # 验证必填字段
         if not data.get('chatroom_name'):
-            return jsonify({'success': False, 'error': '群聊名称不能为空'}), 400
+            return jsonify({'success': False, 'data': None, 'message': '群聊名称不能为空'}), 400
         
         # 检查是否已存在相同的群聊
         existing_chatroom = ProjectChatroom.query.filter_by(
@@ -464,7 +464,7 @@ def add_project_chatroom(project_id):
         ).first()
         
         if existing_chatroom:
-            return jsonify({'success': False, 'error': '该群聊已存在'}), 400
+            return jsonify({'success': False, 'data': None, 'message': '该群聊已存在'}), 400
         
         # 创建新群聊
         new_chatroom = ProjectChatroom(
@@ -493,7 +493,7 @@ def add_project_chatroom(project_id):
         import traceback
         logger.exception(f"添加项目群聊失败: {str(e)}")  # 打印详细堆栈
         tb = traceback.format_exc()
-        return jsonify({'success': False, 'error': str(e), 'traceback': tb}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e), 'traceback': tb}), 500
 
 @projects_bp.route('/<int:project_id>/stats', methods=['GET'])
 def get_project_stats(project_id):
@@ -506,7 +506,7 @@ def get_project_stats(project_id):
     try:
         project = Project.query.get(project_id)
         if not project:
-            return jsonify({'success': False, 'error': '项目不存在'}), 404
+            return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
         
         # 获取项目关联的群聊
         chatrooms = ProjectChatroom.query.filter_by(project_id=project_id).all()
@@ -523,14 +523,14 @@ def get_project_stats(project_id):
                 start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
                 conditions.append(ChatMessage.timestamp >= start_dt)
             except ValueError:
-                return jsonify({'success': False, 'error': '开始日期格式错误'}), 400
+                return jsonify({'success': False, 'data': None, 'message': '开始日期格式错误'}), 400
         
         if end_date:
             try:
                 end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
                 conditions.append(ChatMessage.timestamp <= end_dt)
             except ValueError:
-                return jsonify({'success': False, 'error': '结束日期格式错误'}), 400
+                return jsonify({'success': False, 'data': None, 'message': '结束日期格式错误'}), 400
         
         # 统计项目相关的聊天消息
         chat_query = ChatMessage.query.filter(
@@ -601,7 +601,7 @@ def get_project_stats(project_id):
         })
     except Exception as e:
         logger.error(f"获取项目统计失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @projects_bp.route('/<int:project_id>/workloads', methods=['GET'])
 def get_project_workloads(project_id):
@@ -617,10 +617,9 @@ def get_project_workloads(project_id):
     records = query.order_by(WorkloadRecord.date.desc()).offset((page-1)*size).limit(size).all()
     
     return jsonify({
-        'total': total,
-        'page': page,
-        'size': size,
-        'data': [r.to_dict() for r in records]
+        'success': True,
+        'data': [r.to_dict() for r in records],
+        'message': None
     })
 
 @projects_bp.route('/<int:project_id>/health-stats', methods=['GET'])
@@ -659,10 +658,9 @@ def get_project_risk_events(project_id):
     events = query.order_by(RiskEvent.event_time.desc()).offset((page-1)*size).limit(size).all()
     
     return jsonify({
-        'total': total,
-        'page': page,
-        'size': size,
-        'data': [e.to_dict() for e in events]
+        'success': True,
+        'data': [e.to_dict() for e in events],
+        'message': None
     })
 
 @projects_bp.route('/<int:project_id>/health', methods=['GET'])
@@ -673,7 +671,7 @@ def get_project_health(project_id):
     if health:
         return jsonify({'success': True, 'data': health})
     else:
-        return jsonify({'success': False, 'error': '项目不存在或无健康度数据'}), 404
+        return jsonify({'success': False, 'data': None, 'message': '项目不存在或无健康度数据'}), 404
 
 @projects_bp.route('/<int:project_id>/files', methods=['GET'])
 def get_project_files(project_id):
@@ -723,7 +721,7 @@ def get_project_overview(project_id):
         # 1. 项目基本信息
         project = Project.query.get(project_id)
         if not project:
-            return jsonify({'success': False, 'error': '项目不存在'}), 404
+            return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
         # 2. 群聊信息
         chatrooms = ProjectChatroom.query.filter_by(project_id=project_id).all()
         chatroom_list = [
@@ -839,7 +837,7 @@ def get_project_overview(project_id):
         return jsonify({'success': True, 'data': overview})
     except Exception as e:
         logger.error(f"获取项目聚合视图失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 def get_risk_level(health_score):
     if health_score is None:
@@ -860,7 +858,7 @@ def archive_project(project_id):
     """
     project = Project.query.get(project_id)
     if not project:
-        return jsonify({'success': False, 'error': '项目不存在'}), 404
+        return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
     project.status = 'archived'
     db.session.commit()
     update_all_project_summaries()
@@ -873,7 +871,7 @@ def restore_project(project_id):
     """
     project = Project.query.get(project_id)
     if not project:
-        return jsonify({'success': False, 'error': '项目不存在'}), 404
+        return jsonify({'success': False, 'data': None, 'message': '项目不存在'}), 404
     project.status = 'active'
     db.session.commit()
     update_all_project_summaries()

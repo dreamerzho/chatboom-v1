@@ -159,7 +159,17 @@ class DataManager:
         if file_records:
             import json
             logger.info(f"[入库链路] file_records 前3条: {json.dumps(file_records[:3], ensure_ascii=False, default=str)}")
-        for idx, file_data in enumerate(file_records):
+            # 批量查重，提升效率
+            unique_keys = [(project.id, f.get('chatroom_name', ''), f.get('original_name', '') or f.get('filename', '') or '') for f in file_records]
+            exists_keys = set((r.project_id, r.chatroom_name, r.original_name) for r in FileRecord.query.filter(
+                FileRecord.project_id == project.id,
+                FileRecord.chatroom_name.in_([k[1] for k in unique_keys]),
+                FileRecord.original_name.in_([k[2] for k in unique_keys])
+            ).all())
+            to_insert = [f for f in file_records if (project.id, f.get('chatroom_name', ''), f.get('original_name', '') or f.get('filename', '') or '') not in exists_keys]
+        else:
+            to_insert = []
+        for idx, file_data in enumerate(to_insert):
             try:
                 # 字段校验与默认值，字段为空时用 original_name 兜底
                 original_name = file_data.get('original_name', '') or file_data.get('filename', '') or ''
@@ -217,21 +227,30 @@ class DataManager:
                 logger.error(f"第{idx+1}条文件数据入库异常: {json.dumps(file_data, ensure_ascii=False, default=str)}\n{traceback.format_exc()}")
                 file_fail += 1
                 db.session.rollback()
-        # 聊天消息批量入库（保持原有逻辑）
+        # 聊天消息批量入库（幂等处理，批量查重）
         try:
-            for message_data in sync_result.get('chat_messages', []):
-                chat_message = ChatMessage(
-                    message_id=message_data.get('message_id') or message_data.get('seq', ''),
-                    talker_name=message_data.get('talker_name', ''),
-                    sender_name=message_data.get('sender_name', ''),
-                    message_type=message_data.get('message_type', 1),
-                    content=message_data.get('content', ''),
-                    timestamp=datetime.fromisoformat(message_data.get('timestamp', '')) if message_data.get('timestamp') else datetime.utcnow(),
-                    project_id=project.id
-                )
-                db.session.add(chat_message)
-            db.session.commit()
-            logger.info(f"保存了 {file_success} 个文件记录（失败 {file_fail} 个）和 {len(sync_result.get('chat_messages', []))} 条聊天消息")
+            chat_messages = sync_result.get('chat_messages', [])
+            if chat_messages:
+                message_ids = [msg.get('message_id') or msg.get('seq', '') for msg in chat_messages]
+                # 批量查重
+                exists_ids = set(r[0] for r in db.session.query(ChatMessage.message_id).filter(ChatMessage.project_id == project.id, ChatMessage.message_id.in_(message_ids)).all())
+                to_insert = [msg for msg in chat_messages if (msg.get('message_id') or msg.get('seq', '')) not in exists_ids]
+                for message_data in to_insert:
+                    message_id = message_data.get('message_id') or message_data.get('seq', '')
+                    chat_message = ChatMessage(
+                        message_id=message_id,
+                        talker_name=message_data.get('talker_name', ''),
+                        sender_name=message_data.get('sender_name', ''),
+                        message_type=message_data.get('message_type', 1),
+                        content=message_data.get('content', ''),
+                        timestamp=datetime.fromisoformat(message_data.get('timestamp', '')) if message_data.get('timestamp') else datetime.utcnow(),
+                        project_id=project.id
+                    )
+                    db.session.add(chat_message)
+                db.session.commit()
+                logger.info(f"批量保存了 {len(to_insert)} 条新聊天消息，跳过 {len(chat_messages) - len(to_insert)} 条重复（幂等处理）")
+            else:
+                logger.info("无聊天消息需要入库")
         except Exception as e:
             logger.error(f"保存聊天消息失败: {str(e)}")
             db.session.rollback()
@@ -269,24 +288,20 @@ class DataManager:
             return '其他'
     
     def _generate_workload_record(self, file_record: FileRecord, project: Project, parsed_data):
-        """生成工作量明细记录（保持原有逻辑）"""
+        """生成工作量明细记录（保持原有逻辑，增强唯一性查重与兜底）"""
         try:
             # 初始化文件名验证器
             file_name_validator = FileNameValidator()
-            
             # 解析文件名，获取产出类型、业务单位、数量等
             filename = file_record.original_name
             validate_result = file_name_validator.validate_filename(filename)
             parsed_info = validate_result.get('parsed_info', {}) if validate_result.get('is_compliant') else {}
-            
             # 获取员工岗位
             employee_id = file_record.employee_id
             employee = EmployeeMapping.query.get(employee_id) if employee_id else None
             role = employee.role if employee else '未知'
-            
             # 推断产出类型
             output_type = '最终版-' + parsed_info.get('extension', '') if parsed_info else '其他'
-            
             # 业务单位与数量
             business_unit = None
             quantity = 1.0
@@ -297,10 +312,8 @@ class DataManager:
                 if m:
                     quantity = float(m.group(1))
                     business_unit = m.group(2) or None
-            
             # 是否为最终版
             is_final = True if '最终' in output_type or 'final' in output_type.lower() else False
-            
             # 计算WE值（查找权重表）
             we_value = 0.0
             if role != '未知' and output_type != '其他' and business_unit:
@@ -313,27 +326,40 @@ class DataManager:
                 ).first()
                 if weight:
                     we_value = weight.we_per_unit * quantity
-            
+                else:
+                    logger.warning(f"WE权重未配置: {role}-{output_type}-{business_unit}-final={is_final}")
+            else:
+                logger.warning(f"WE权重查找条件不全: role={role}, output_type={output_type}, business_unit={business_unit}")
+            # 唯一性查重，避免重复明细
+            date_val = file_record.upload_time.date() if file_record.upload_time else datetime.utcnow().date()
+            exists = WorkloadRecord.query.filter_by(
+                employee_id=employee_id or None,
+                project_id=project.id,
+                date=date_val,
+                related_file_id=file_record.id
+            ).first()
+            if exists:
+                logger.warning(f"唯一性冲突，跳过WorkloadRecord: employee_id={employee_id}, project_id={project.id}, file_id={file_record.id}, date={date_val}")
+                return
             # 生成WorkloadRecord
             workload_record = WorkloadRecord(
                 employee_id=employee_id or None,
                 project_id=project.id,
-                date=file_record.upload_time.date() if file_record.upload_time else datetime.utcnow().date(),
-                role=role,
-                output_type=output_type,
+                date=date_val,
+                role=role or '未知',
+                output_type=output_type or '其他',
                 output_value=file_record.id,
-                we_value=we_value,
+                we_value=we_value if we_value is not None else 0.0,
                 is_final=is_final,
                 is_iteration=False,
                 iteration_count=0,
                 related_file_id=file_record.id,
                 related_message_id=file_record.message_seq,
                 business_unit=business_unit,
-                quantity=quantity,
+                quantity=quantity if quantity is not None else 1.0,
                 created_at=datetime.utcnow()
             )
             db.session.add(workload_record)
-            
         except Exception as e:
             logger.error(f"生成工作量记录失败: {str(e)}")
     

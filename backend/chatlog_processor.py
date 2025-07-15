@@ -294,6 +294,7 @@ class ChatLogProcessor:
         """
         解析文件名组件，支持多种格式
         格式: [YYMMDD]-[项目名]-[工单名/内容描述]-[工作量]-[作者缩写]-[版本号].扩展名
+        优化：支持空格、下划线、大小写、可选字段，正则不匹配时用分割法兜底
         """
         components = {
             'date': '',
@@ -305,29 +306,49 @@ class ChatLogProcessor:
             'extension': '',
             'is_standard_format': False
         }
-        
         try:
-            # 尝试标准格式解析
-            match = self.parser.filename_parse_regex.match(filename)
+            # 预处理：去除首尾空格，统一分隔符
+            fname = filename.strip().replace('_', '-').replace('—', '-').replace('－', '-')
+            # 优化正则：支持空格、下划线、大小写、可选字段
+            pattern = re.compile(
+                r'^(\d{6})-([^-]+)-([^-]+)-([^-]+)-([^-]+)-v?(\d+(?:\.\d+)*)\.([a-zA-Z0-9]+)$', re.IGNORECASE)
+            match = pattern.match(fname)
             if match:
                 components.update({
                     'date': match.group(1),
-                    'project_name': match.group(2),
-                    'work_order': match.group(3),
-                    'workload': match.group(4),
-                    'author_abbreviation': match.group(5),
-                    'version': match.group(6),
-                    'extension': match.group(7),
+                    'project_name': match.group(2).strip(),
+                    'work_order': match.group(3).strip(),
+                    'workload': match.group(4).strip(),
+                    'author_abbreviation': match.group(5).strip(),
+                    'version': match.group(6).strip(),
+                    'extension': match.group(7).lower(),
                     'is_standard_format': True
                 })
             else:
-                # 非标准格式，尝试简单解析
-                components['project_name'] = self._extract_project_name_simple(filename)
-                components['extension'] = self._extract_extension_simple(filename)
-                
+                # 正则不匹配时，尝试用分割法兜底
+                name_part = fname.rsplit('.', 1)[0]
+                ext = fname.rsplit('.', 1)[1] if '.' in fname else ''
+                parts = [p.strip() for p in name_part.split('-')]
+                # 只处理长度>=6的情况
+                if len(parts) >= 6:
+                    components['date'] = parts[0]
+                    components['project_name'] = parts[1]
+                    components['work_order'] = parts[2]
+                    components['workload'] = parts[3]
+                    components['author_abbreviation'] = parts[4]
+                    components['version'] = parts[5]
+                    components['extension'] = ext.lower()
+                else:
+                    # 长度不足时，尽量补全主要字段
+                    if len(parts) > 0: components['date'] = parts[0]
+                    if len(parts) > 1: components['project_name'] = parts[1]
+                    if len(parts) > 2: components['work_order'] = parts[2]
+                    if len(parts) > 3: components['workload'] = parts[3]
+                    if len(parts) > 4: components['author_abbreviation'] = parts[4]
+                    if len(parts) > 5: components['version'] = parts[5]
+                    components['extension'] = ext.lower()
         except Exception as e:
             logger.error(f"解析文件名组件失败: {str(e)}, 文件名: {filename}")
-        
         return components
 
     def _extract_project_name_simple(self, filename: str) -> str:

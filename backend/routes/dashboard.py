@@ -80,20 +80,17 @@ def get_dashboard_trends():
             })
             current_date += timedelta(days=1)
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'trends': date_series,
-                'period': {
-                    'start_date': str(start_date),
-                    'end_date': str(end_date),
-                    'days': days
-                }
+        return jsonify({'success': True, 'data': {
+            'trends': date_series,
+            'period': {
+                'start_date': str(start_date),
+                'end_date': str(end_date),
+                'days': days
             }
-        })
+        }, 'message': None})
     except Exception as e:
         logger.error(f"获取趋势数据失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/top-performers', methods=['GET'])
 def get_top_performers():
@@ -167,17 +164,10 @@ def get_top_performers():
         # 按总分排序
         performers.sort(key=lambda x: x['total_score'], reverse=True)
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'performers': performers[:10],
-                'period': period,
-                'start_time': start_time.isoformat()
-            }
-        })
+        return jsonify({'success': True, 'data': performers[:10], 'message': None})
     except Exception as e:
         logger.error(f"获取表现最佳员工失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/project-summary', methods=['GET'])
 def get_project_summary():
@@ -187,9 +177,9 @@ def get_project_summary():
     try:
         summaries = ProjectSummary.query.order_by(ProjectSummary.health_score.asc()).limit(20).all()
         data = [s.to_dict() for s in summaries]
-        return jsonify({'success': True, 'data': data})
+        return jsonify({'success': True, 'data': data, 'message': None})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 # ========== 新增：兼容前端的仪表盘统计接口 ==========
 
@@ -219,10 +209,10 @@ def dashboard_stats():
             'total_files': total_files,
             'compliant_files': compliant_files,
             'recent_files': recent_files
-        }})
+        }, 'message': None})
     except Exception as e:
         logger.error(f"获取仪表盘总览失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/employee-ranking', methods=['GET'])
 def get_employee_ranking():
@@ -249,7 +239,7 @@ def get_employee_ranking():
 
     ranking = query.group_by(EmployeeMapping.real_name).order_by(func.sum(WorkloadRecord.we_value).desc()).limit(20).all()
     
-    return jsonify([{'name': r.real_name, 'total_we': r.total_we} for r in ranking])
+    return jsonify({'success': True, 'data': [{'name': r.real_name, 'total_we': r.total_we} for r in ranking], 'message': None})
 
 @dashboard_bp.route('/negative-feedback', methods=['GET'])
 def dashboard_negative_feedback():
@@ -271,10 +261,10 @@ def dashboard_negative_feedback():
                 'group_name': msg.talker_name,
                 'negative_keywords': found_keywords
             })
-        return jsonify({'success': True, 'data': result})
+        return jsonify({'success': True, 'data': result, 'message': None})
     except Exception as e:
         logger.error(f"获取负面反馈失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/recent-activities', methods=['GET'])
 def dashboard_recent_activities():
@@ -301,10 +291,10 @@ def dashboard_recent_activities():
             'status': p.status
         } for p in projects]
         acts = sorted(file_acts + proj_acts, key=lambda x: x['time'], reverse=True)[:10]
-        return jsonify({'success': True, 'data': acts})
+        return jsonify({'success': True, 'data': acts, 'message': None})
     except Exception as e:
         logger.error(f"获取近期动态失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 # ========== 新增：工作量明细记录API ========== 
 
@@ -342,18 +332,10 @@ def get_workload_records():
                 pass
         total = query.count()
         records = query.order_by(WorkloadRecord.date.desc()).offset((page-1)*page_size).limit(page_size).all()
-        return jsonify({
-            'success': True,
-            'data': [r.to_dict() for r in records],
-            'pagination': {
-                'page': page,
-                'page_size': page_size,
-                'total': total
-            }
-        })
+        return jsonify({'success': True, 'data': [r.to_dict() for r in records], 'pagination': {'page': page, 'page_size': page_size, 'total': total}, 'message': None})
     except Exception as e:
         logger.error(f"获取工作量明细记录失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/workloads', methods=['POST'])
 def create_workload_record():
@@ -385,10 +367,10 @@ def create_workload_record():
         )
         db.session.add(record)
         db.session.commit()
-        return jsonify({'success': True, 'data': record.to_dict()})
+        return jsonify({'success': True, 'data': record.to_dict(), 'message': None})
     except Exception as e:
         logger.error(f"新增工作量明细记录失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/workloads/<int:record_id>', methods=['GET'])
 def get_workload_record_detail(record_id):
@@ -401,10 +383,10 @@ def get_workload_record_detail(record_id):
         record = WorkloadRecord.query.get(record_id)
         if not record:
             return jsonify({'success': False, 'error': '记录不存在'}), 404
-        return jsonify({'success': True, 'data': record.to_dict()})
+        return jsonify({'success': True, 'data': record.to_dict(), 'message': None})
     except Exception as e:
         logger.error(f"获取工作量明细记录详情失败: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/project-health', methods=['GET'])
 def get_project_health_stats():
@@ -413,7 +395,7 @@ def get_project_health_stats():
     支持前端仪表盘项目榜单、健康趋势等区块
     """
     stats = ProjectHealthStats.query.order_by(ProjectHealthStats.created_at.desc()).all()
-    return jsonify([s.to_dict() for s in stats])
+    return jsonify({'success': True, 'data': [s.to_dict() for s in stats], 'message': None})
 
 @dashboard_bp.route('/risk-feed', methods=['GET'])
 def get_risk_feed():
@@ -422,7 +404,7 @@ def get_risk_feed():
     支持前端仪表盘风险流、预警推送等区块
     """
     events = RiskEvent.query.order_by(RiskEvent.event_time.desc()).limit(30).all()
-    return jsonify([e.to_dict() for e in events])
+    return jsonify({'success': True, 'data': [e.to_dict() for e in events], 'message': None})
 
 @dashboard_bp.route('/workload-trend', methods=['GET'])
 def get_workload_trend():
@@ -441,7 +423,7 @@ def get_workload_trend():
     if role:
         query = query.filter(WorkloadRecord.role == role)
     trend = query.group_by(WorkloadRecord.date).order_by(WorkloadRecord.date).all()
-    return jsonify([{'date': r.date.isoformat(), 'total_we': r.total_we} for r in trend])
+    return jsonify({'success': True, 'data': [{'date': r.date.isoformat(), 'total_we': r.total_we} for r in trend], 'message': None})
 
 @dashboard_bp.route('/kpis', methods=['GET'])
 def get_dashboard_kpis():
@@ -465,20 +447,10 @@ def get_dashboard_kpis():
         # 使用分析服务获取KPI数据
         kpi_data = analysis_service.get_dashboard_kpis(start_date, end_date)
         
-        return jsonify({
-            'success': True,
-            'data': kpi_data,
-            'time_range': {
-                'start_date': start_date.isoformat(),
-                'end_date': end_date.isoformat()
-            }
-        })
+        return jsonify({'success': True, 'data': kpi_data, 'time_range': {'start_date': start_date.isoformat(), 'end_date': end_date.isoformat()}, 'message': None})
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/workload-ranking', methods=['GET'])
 def get_workload_ranking():
@@ -537,20 +509,10 @@ def get_workload_ranking():
                 'efficiency_score': load_data['efficiency_score']
             })
         
-        return jsonify({
-            'success': True,
-            'data': ranking_data,
-            'time_range': {
-                'start_date': start_date.isoformat(),
-                'end_date': end_date.isoformat()
-            }
-        })
+        return jsonify({'success': True, 'data': ranking_data, 'time_range': {'start_date': start_date.isoformat(), 'end_date': end_date.isoformat()}, 'message': None})
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/high-risk-projects', methods=['GET'])
 def get_high_risk_projects():
@@ -582,16 +544,10 @@ def get_high_risk_projects():
         # 按健康度排序
         risk_projects.sort(key=lambda x: x['health_score'])
         
-        return jsonify({
-            'success': True,
-            'data': risk_projects
-        })
+        return jsonify({'success': True, 'data': risk_projects, 'message': None})
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/workload-trends', methods=['GET'])
 def get_workload_trends():
@@ -630,20 +586,10 @@ def get_workload_trends():
                 'asset_count': asset_count
             })
         
-        return jsonify({
-            'success': True,
-            'data': trends_data,
-            'time_range': {
-                'start_date': start_date.isoformat(),
-                'end_date': end_date.isoformat()
-            }
-        })
+        return jsonify({'success': True, 'data': trends_data, 'time_range': {'start_date': start_date.isoformat(), 'end_date': end_date.isoformat()}, 'message': None})
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/team-performance', methods=['GET'])
 def get_team_performance():
@@ -700,20 +646,10 @@ def get_team_performance():
         for category in performance_data:
             performance_data[category].sort(key=lambda x: x['output_we'], reverse=True)
         
-        return jsonify({
-            'success': True,
-            'data': performance_data,
-            'time_range': {
-                'start_date': start_date.isoformat(),
-                'end_date': end_date.isoformat()
-            }
-        })
+        return jsonify({'success': True, 'data': performance_data, 'time_range': {'start_date': start_date.isoformat(), 'end_date': end_date.isoformat()}, 'message': None})
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/project-risks', methods=['GET'])
 def get_project_risks():
@@ -745,16 +681,10 @@ def get_project_risks():
         # 按健康度排序
         risk_data.sort(key=lambda x: x['health_score'])
         
-        return jsonify({
-            'success': True,
-            'data': risk_data
-        })
+        return jsonify({'success': True, 'data': risk_data, 'message': None})
         
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @dashboard_bp.route('/overview', methods=['GET'])
 def get_dashboard_overview():
@@ -764,19 +694,16 @@ def get_dashboard_overview():
     try:
         summaries = ProjectSummary.query.all()
         data = [s.to_dict() for s in summaries]
-        return jsonify({'success': True, 'data': data})
+        return jsonify({'success': True, 'data': data, 'message': None})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 # ====== 算法参数配置API ======
 @dashboard_bp.route('/analysis/config', methods=['GET'])
 def get_analysis_config():
     """获取所有算法参数"""
     configs = AnalysisConfig.query.all()
-    return jsonify({
-        'success': True,
-        'data': [c.to_dict() for c in configs]
-    })
+    return jsonify({'success': True, 'data': [c.to_dict() for c in configs], 'message': None})
 
 @dashboard_bp.route('/analysis/config', methods=['POST'])
 def set_analysis_config():
@@ -799,7 +726,7 @@ def set_analysis_config():
             config = AnalysisConfig(key=key, value=value, description=description)
             db.session.add(config)
     db.session.commit()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'message': None})
 
 @dashboard_bp.route('/', methods=['GET'])
 def dashboard_root():
@@ -809,6 +736,6 @@ def dashboard_root():
     try:
         summaries = ProjectSummary.query.all()
         data = [s.to_dict() for s in summaries]
-        return jsonify({'success': True, 'data': data})
+        return jsonify({'success': True, 'data': data, 'message': None})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500 
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500 

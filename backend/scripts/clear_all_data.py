@@ -1,6 +1,5 @@
 # 清空所有核心业务表数据脚本
-# 用于开发环境下快速清理所有业务数据，重置自增ID
-# 使用前请确保数据库连接正确，且无重要数据
+# 用于开发环境下快速清理所有业务数据，重置自增ID（仅支持PostgreSQL）
 
 from backend.app import app
 from backend.db import db
@@ -28,7 +27,8 @@ with app.app_context():
     db.session.query(UnmatchedPerson).delete()
     db.session.query(Project).delete()
     db.session.commit()
-    # 2. 再用原生 SQL 强制清空（兼容 SQLite/MySQL/PostgreSQL）
+    # 2. 再用原生 SQL 强制清空（仅支持PostgreSQL）
+    # 仅支持PostgreSQL环境，其他数据库请勿使用本脚本
     engine = db.get_engine()
     conn = engine.connect()
     trans = conn.begin()
@@ -37,13 +37,7 @@ with app.app_context():
             'projectchatroom', 'chatmessage', 'filerecord', 'asset', 'workloadrecord',
             'projecthealthstats', 'projectdifficultyindex', 'riskevent', 'unmatchedperson', 'project']:
             try:
-                conn.execute(f"DELETE FROM {table};")
-                # SQLite: 重置自增ID
-                if engine.dialect.name == 'sqlite':
-                    conn.execute(f"DELETE FROM sqlite_sequence WHERE name='{table}';")
-                # PostgreSQL/MySQL: 可用 TRUNCATE
-                elif engine.dialect.name in ['postgresql', 'mysql']:
-                    conn.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY CASCADE;")
+                conn.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY CASCADE;")
             except Exception as e:
                 print(f"清空表 {table} 时出错: {e}")
         trans.commit()

@@ -56,13 +56,13 @@ def get_workload_records():
                 start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
                 query = query.filter(WorkloadRecord.date >= start_date_obj)
             except ValueError:
-                return APIResponse.error("开始日期格式错误，请使用YYYY-MM-DD格式")
+                return jsonify({'success': False, 'data': None, 'message': "开始日期格式错误，请使用YYYY-MM-DD格式"})
         if end_date:
             try:
                 end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
                 query = query.filter(WorkloadRecord.date <= end_date_obj)
             except ValueError:
-                return APIResponse.error("结束日期格式错误，请使用YYYY-MM-DD格式")
+                return jsonify({'success': False, 'data': None, 'message': "结束日期格式错误，请使用YYYY-MM-DD格式"})
         if role:
             query = query.filter(WorkloadRecord.role == role)
         if output_type:
@@ -83,7 +83,7 @@ def get_workload_records():
         # 转换为字典格式
         records_data = [record.to_dict() for record in records]
         
-        return APIResponse.success({
+        return jsonify({'success': True, 'data': {
             'records': records_data,
             'pagination': {
                 'page': page,
@@ -91,10 +91,10 @@ def get_workload_records():
                 'total': total,
                 'pages': total_pages
             }
-        })
+        }, 'message': None})
         
     except Exception as e:
-        return APIResponse.error(f"获取工作量记录失败: {str(e)}")
+        return jsonify({'success': False, 'data': None, 'message': f"获取工作量记录失败: {str(e)}"}), 500
 
 @workload_bp.route('/records/<int:record_id>', methods=['GET'])
 def get_workload_record_detail(record_id: int):
@@ -109,12 +109,12 @@ def get_workload_record_detail(record_id: int):
         ).filter(WorkloadRecord.id == record_id).first()
         
         if not record:
-            return APIResponse.error("工作量记录不存在")
+            return jsonify({'success': False, 'data': None, 'message': "工作量记录不存在"})
         
-        return APIResponse.success(record.to_dict())
+        return jsonify({'success': True, 'data': record.to_dict(), 'message': None})
         
     except Exception as e:
-        return APIResponse.error(f"获取工作量记录详情失败: {str(e)}")
+        return jsonify({'success': False, 'data': None, 'message': f"获取工作量记录详情失败: {str(e)}"}), 500
 
 @workload_bp.route('/employees/<int:employee_id>/stats', methods=['GET'])
 def get_employee_workload_stats(employee_id: int):
@@ -141,7 +141,7 @@ def get_employee_workload_stats(employee_id: int):
         # 获取员工信息
         employee = EmployeeMapping.query.filter(EmployeeMapping.id == employee_id).first()
         if not employee:
-            return APIResponse.error("员工不存在")
+            return jsonify({'success': False, 'data': None, 'message': "员工不存在"})
         
         # 获取工作量记录
         records = WorkloadRecord.query.filter(
@@ -178,7 +178,7 @@ def get_employee_workload_stats(employee_id: int):
             employee_id, start_date, end_date
         )
         
-        return APIResponse.success({
+        return jsonify({'success': True, 'data': {
             'employee': {
                 'id': employee.id,
                 'real_name': employee.real_name,
@@ -199,10 +199,10 @@ def get_employee_workload_stats(employee_id: int):
             },
             'role_stats': role_stats,
             'load_index': load_index
-        })
+        }, 'message': None})
         
     except Exception as e:
-        return APIResponse.error(f"获取员工工作量统计失败: {str(e)}")
+        return jsonify({'success': False, 'data': None, 'message': f"获取员工工作量统计失败: {str(e)}"}), 500
 
 @workload_bp.route('/projects/<int:project_id>/stats', methods=['GET'])
 def get_project_workload_stats(project_id: int):
@@ -214,7 +214,7 @@ def get_project_workload_stats(project_id: int):
         # 获取项目信息
         project = Project.query.filter(Project.id == project_id).first()
         if not project:
-            return APIResponse.error("项目不存在")
+            return jsonify({'success': False, 'data': None, 'message': "项目不存在"})
         
         # 获取项目工作量记录
         records = WorkloadRecord.query.options(
@@ -248,7 +248,7 @@ def get_project_workload_stats(project_id: int):
         # 计算项目健康度
         health_score = analysis_service.calculate_project_health_score(project_id)
         
-        return APIResponse.success({
+        return jsonify({'success': True, 'data': {
             'project': {
                 'id': project.id,
                 'project_name': project.project_name,
@@ -263,10 +263,10 @@ def get_project_workload_stats(project_id: int):
             },
             'employee_stats': employee_stats,
             'health_score': health_score
-        })
+        }, 'message': None})
         
     except Exception as e:
-        return APIResponse.error(f"获取项目工作量统计失败: {str(e)}")
+        return jsonify({'success': False, 'data': None, 'message': f"获取项目工作量统计失败: {str(e)}"}), 500
 
 @workload_bp.route('/sync', methods=['POST'])
 def sync_workload_records():
@@ -298,7 +298,7 @@ def sync_workload_records():
         # 同步聊天记录
         chat_records_synced = _sync_chat_records(start_date_obj, end_date_obj, force_sync)
         
-        return APIResponse.success({
+        return jsonify({'success': True, 'data': {
             'message': '工作量记录同步完成',
             'file_records_synced': file_records_synced,
             'chat_records_synced': chat_records_synced,
@@ -306,10 +306,10 @@ def sync_workload_records():
                 'start_date': start_date_obj.isoformat(),
                 'end_date': end_date_obj.isoformat()
             }
-        })
+        }, 'message': None})
         
     except Exception as e:
-        return APIResponse.error(f"同步工作量记录失败: {str(e)}")
+        return jsonify({'success': False, 'data': None, 'message': f"同步工作量记录失败: {str(e)}"}), 500
 
 def _sync_file_records(start_date: date, end_date: date, force_sync: bool = False) -> int:
     """

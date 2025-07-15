@@ -57,10 +57,10 @@ def get_employees():
         employees = paginated_query.all()
         employee_list = [emp.to_dict() for emp in employees]
 
-        return APIResponse.paginated_success(employee_list, page, per_page, total)
+        return jsonify({'success': True, 'data': employee_list, 'message': None})
     except Exception as e:
         logger.error(f"获取员工列表失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/', methods=['POST'])
 def create_employee():
@@ -100,13 +100,10 @@ def create_employee():
         )
         db.session.add(new_employee)
         db.session.commit()
-        return APIResponse.created(
-            data=new_employee.to_dict(),
-            message='员工映射创建成功'
-        )
+        return jsonify({'success': True, 'data': new_employee.to_dict(), 'message': '员工映射创建成功'})
     except Exception as e:
         logger.error(f"创建员工映射失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/<int:employee_id>', methods=['PUT'])
 def update_employee(employee_id):
@@ -144,13 +141,10 @@ def update_employee(employee_id):
             employee.role = data['role']
         employee.updated_at = datetime.utcnow()
         db.session.commit()
-        return APIResponse.success(
-            data=employee.to_dict(),
-            message='员工映射更新成功'
-        )
+        return jsonify({'success': True, 'data': employee.to_dict(), 'message': '员工映射更新成功'})
     except Exception as e:
         logger.error(f"更新员工映射失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/<int:employee_id>', methods=['DELETE'])
 def delete_employee(employee_id):
@@ -165,10 +159,10 @@ def delete_employee(employee_id):
             return APIResponse.not_found("员工", employee_id)
         db.session.delete(employee)
         db.session.commit()
-        return APIResponse.no_content("员工映射删除成功")
+        return jsonify({'success': True, 'data': None, 'message': '员工映射删除成功'})
     except Exception as e:
         logger.error(f"删除员工映射失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/<int:employee_id>/workloads', methods=['GET'])
 def get_employee_workloads(employee_id):
@@ -188,15 +182,10 @@ def get_employee_workloads(employee_id):
             query = query.filter(WorkloadRecord.date <= end)
         total = query.count()
         records = query.order_by(WorkloadRecord.date.desc()).offset((page-1)*size).limit(size).all()
-        return jsonify({
-            'total': total,
-            'page': page,
-            'size': size,
-            'data': [r.to_dict() for r in records]
-        })
+        return jsonify({'success': True, 'data': [r.to_dict() for r in records], 'message': None})
     except Exception as e:
         logger.error(f"获取员工工作量明细失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/<int:employee_id>/stats', methods=['GET'])
 def get_employee_full_stats(employee_id):
@@ -216,11 +205,11 @@ def get_employee_full_stats(employee_id):
             end_date=end_date
         )
         if result['success']:
-            return jsonify(result)
+            return jsonify({'success': True, 'data': result.get('data', {}), 'message': result.get('message', None)})
         else:
-            return jsonify({'success': False, 'error': result['error']}), 404
+            return jsonify({'success': False, 'data': None, 'message': result.get('error', '未知错误')}), 404
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/<int:employee_id>/risk-events', methods=['GET'])
 def get_employee_risk_events(employee_id):
@@ -239,15 +228,10 @@ def get_employee_risk_events(employee_id):
         )
         total = query.count()
         events = query.order_by(RiskEvent.event_time.desc()).offset((page-1)*size).limit(size).all()
-        return jsonify({
-            'total': total,
-            'page': page,
-            'size': size,
-            'data': [e.to_dict() for e in events]
-        })
+        return jsonify({'success': True, 'data': [e.to_dict() for e in events], 'message': None})
     except Exception as e:
         logger.error(f"获取员工风险事件失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/stats/overview', methods=['GET'])
 def get_employees_overview():
@@ -260,10 +244,10 @@ def get_employees_overview():
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         overview = data_manager.get_employees_overview(start_date, end_date)
-        return APIResponse.success(data=overview, message="员工统计总览获取成功")
+        return jsonify({'success': True, 'data': overview, 'message': '员工统计总览获取成功'})
     except Exception as e:
         logger.error(f"获取员工统计总览失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/unmapped', methods=['GET'])
 def get_unmapped_senders():
@@ -273,10 +257,10 @@ def get_unmapped_senders():
     """
     try:
         unmapped = data_manager.get_unmapped_senders()
-        return APIResponse.success(data=unmapped, message="未映射微信昵称获取成功")
+        return jsonify({'success': True, 'data': unmapped, 'message': '未映射微信昵称获取成功'})
     except Exception as e:
         logger.error(f"获取未映射微信昵称失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/unmapped/batch-add', methods=['POST'])
 def batch_add_unmapped_senders():
@@ -293,10 +277,10 @@ def batch_add_unmapped_senders():
         if not isinstance(senders, list):
             return APIResponse.validation_error(["senders必须为数组"])
         result = data_manager.batch_add_unmapped_senders(senders)
-        return APIResponse.success(data=result, message="批量添加未映射微信昵称成功")
+        return jsonify({'success': True, 'data': result, 'message': '批量添加未映射微信昵称成功'})
     except Exception as e:
         logger.error(f"批量添加未映射微信昵称失败: {str(e)}")
-        return APIResponse.database_error(str(e))
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/batch-import', methods=['POST'])
 def batch_import_employees():
@@ -353,9 +337,9 @@ def batch_import_employees():
             except Exception as e:
                 db.session.rollback()
                 results.append({'微信昵称': nickname, '状态': '失败', '原因': str(e)})
-        return jsonify({'success': True, 'results': results})
+        return jsonify({'success': True, 'data': results, 'message': None})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500
 
 @employees_bp.route('/export', methods=['GET'])
 def export_employees():
@@ -365,7 +349,7 @@ def export_employees():
     """
     try:
         export_data = data_manager.export_employees()
-        return APIResponse.success(data=export_data, message="员工映射导出成功")
+        return jsonify({'success': True, 'data': export_data, 'message': '员工映射导出成功'})
     except Exception as e:
         logger.error(f"导出员工映射失败: {str(e)}")
-        return APIResponse.database_error(str(e)) 
+        return jsonify({'success': False, 'data': None, 'message': str(e)}), 500 
