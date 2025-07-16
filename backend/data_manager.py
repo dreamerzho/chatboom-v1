@@ -288,48 +288,68 @@ class DataManager:
             return '其他'
     
     def _generate_workload_record(self, file_record: FileRecord, project: Project, parsed_data):
-        """生成工作量明细记录（保持原有逻辑，增强唯一性查重与兜底）"""
+        """生成工作量明细记录（标准化归一+异常兜底+员工判定）"""
         try:
-            # 初始化文件名验证器
-            file_name_validator = FileNameValidator()
-            # 解析文件名，获取产出类型、业务单位、数量等
+            # 统一入口：用 ParserService 解析，补全员工判定
             filename = file_record.original_name
-            validate_result = file_name_validator.validate_filename(filename)
-            parsed_info = validate_result.get('parsed_info', {}) if validate_result.get('is_compliant') else {}
-            # 获取员工岗位
-            employee_id = file_record.employee_id
-            employee = EmployeeMapping.query.get(employee_id) if employee_id else None
-            role = employee.role if employee else '未知'
-            # 推断产出类型
-            output_type = '最终版-' + parsed_info.get('extension', '') if parsed_info else '其他'
-            # 业务单位与数量
-            business_unit = None
+            uploader = file_record.uploader if hasattr(file_record, 'uploader') else None
+            employee_id = file_record.employee_id if hasattr(file_record, 'employee_id') else None
+            # 传递 file_record 便于多源融合
+            parsed = self.parser_service.parse(
+                filename=filename,
+                file_record={
+                    'original_name': file_record.original_name,
+                    'author_abbreviation': file_record.author_abbreviation,
+                    'uploader': uploader,
+                    'employee_id': employee_id,
+                    'file_extension': file_record.file_extension,
+                    'project_name': file_record.project_name,
+                    'work_order': file_record.work_order,
+                    'workload': file_record.workload,
+                    'upload_time': file_record.upload_time,
+                    'version': file_record.version,
+                },
+                uploader=uploader,
+                employee_id=employee_id
+            )
+            # 员工判定与岗位归一
+            role = parsed.role or '未知'
+            if role not in ['设计', '文案', 'PM', 'AE', '内部员工']:
+                # 非内部员工直接 return，并记录异常
+                if hasattr(parsed, 'parse_errors'):
+                    parsed.parse_errors.append(f"非内部员工/外部客户/未知岗位，role={role}，文件名={filename}")
+                else:
+                    parsed.parse_errors = [f"非内部员工/外部客户/未知岗位，role={role}，文件名={filename}"]
+                return  # 跳过无效数据
+            # 字段归一与兜底
+            output_type = parsed.output_type or '其他'
+            business_unit = parsed.business_unit or None
             quantity = 1.0
-            workload_str = parsed_info.get('workload') if parsed_info else None
-            if workload_str:
-                import re
-                m = re.match(r'^(\d+)([a-zA-Z\u4e00-\u9fa5]*)$', workload_str)
-                if m:
-                    quantity = float(m.group(1))
-                    business_unit = m.group(2) or None
-            # 是否为最终版
-            is_final = True if '最终' in output_type or 'final' in output_type.lower() else False
+            if hasattr(parsed, 'extra') and 'quantity' in parsed.extra:
+                try:
+                    quantity = float(parsed.extra['quantity'])
+                except Exception:
+                    if hasattr(parsed, 'parse_errors'):
+                        parsed.parse_errors.append(f"quantity 字段无法转为 float，原始值: {parsed.extra['quantity']}")
+            is_final = True if output_type and ('最终' in output_type or 'final' in output_type.lower()) else False
             # 计算WE值（查找权重表）
             we_value = 0.0
-            if role != '未知' and output_type != '其他' and business_unit:
+            if role and output_type != '其他' and business_unit:
                 weight = WorkloadWeights.query.filter_by(
-                    role=role, 
-                    output_type=output_type, 
-                    business_unit=business_unit, 
-                    is_final=is_final, 
+                    role=role,
+                    output_type=output_type,
+                    business_unit=business_unit,
+                    is_final=is_final,
                     is_active=True
                 ).first()
                 if weight:
                     we_value = weight.we_per_unit * quantity
                 else:
-                    logger.warning(f"WE权重未配置: {role}-{output_type}-{business_unit}-final={is_final}")
+                    if hasattr(parsed, 'parse_errors'):
+                        parsed.parse_errors.append(f"WE权重未配置: {role}-{output_type}-{business_unit}-final={is_final}")
             else:
-                logger.warning(f"WE权重查找条件不全: role={role}, output_type={output_type}, business_unit={business_unit}")
+                if hasattr(parsed, 'parse_errors'):
+                    parsed.parse_errors.append(f"WE权重查找条件不全: role={role}, output_type={output_type}, business_unit={business_unit}")
             # 唯一性查重，避免重复明细
             date_val = file_record.upload_time.date() if file_record.upload_time else datetime.utcnow().date()
             exists = WorkloadRecord.query.filter_by(
@@ -339,7 +359,8 @@ class DataManager:
                 related_file_id=file_record.id
             ).first()
             if exists:
-                logger.warning(f"唯一性冲突，跳过WorkloadRecord: employee_id={employee_id}, project_id={project.id}, file_id={file_record.id}, date={date_val}")
+                if hasattr(parsed, 'parse_errors'):
+                    parsed.parse_errors.append(f"唯一性冲突，跳过WorkloadRecord: employee_id={employee_id}, project_id={project.id}, file_id={file_record.id}, date={date_val}")
                 return
             # 生成WorkloadRecord
             workload_record = WorkloadRecord(
@@ -361,7 +382,8 @@ class DataManager:
             )
             db.session.add(workload_record)
         except Exception as e:
-            logger.error(f"生成工作量记录失败: {str(e)}")
+            import traceback
+            logger.error(f"生成工作量记录失败: {str(e)}\n{traceback.format_exc()}")
     
     def _update_project_stats(self, project: Project):
         """更新项目统计信息"""

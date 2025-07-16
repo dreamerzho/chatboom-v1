@@ -71,10 +71,11 @@ with app.app_context():
 
 def batch_fix_file_records():
     """
-    批量修正文件合规状态、项目名归类、工时统计
+    批量修正文件合规状态、项目名归类、工时统计（升级为走 ParserService 归一链路）
     """
-    print("\n=== 批量修正文件合规状态、项目名归类、工时统计 ===")
-    validator = FileNameValidator()
+    print("\n=== 批量修正文件合规状态、项目名归类、工时统计（ParserService归一） ===")
+    from backend.parser_service import ParserService
+    parser = ParserService()
     session = db.session
 
     # 获取所有项目名（去除"项目"等后缀，全部小写）
@@ -101,26 +102,65 @@ def batch_fix_file_records():
         if not file.version:
             match = re.search(r'[Vv](\d+)', file.original_name)
             file.version = f'V{match.group(1)}' if match else 'V1'
-        result = validator.validate_filename(file.original_name)
-        if result['is_compliant']:
-            file.status = 'compliant'
-            info = result['parsed_info']
-            # 项目名归类
-            proj = info['project_name'].lower().replace('项目', '').replace(' ', '')
-            best_match = None
-            for pn in project_names:
-                if proj in pn or pn in proj:
-                    best_match = project_name_map[pn]
-                    break
-            if best_match:
-                file.project_name = best_match
-            else:
-                file.project_name = info['project_name']
-        else:
+        # 统一用 ParserService 解析
+        parsed = parser.parse(
+            filename=file.original_name,
+            file_record={
+                'original_name': file.original_name,
+                'author_abbreviation': file.author_abbreviation,
+                'uploader': file.uploader,
+                'employee_id': file.employee_id,
+                'file_extension': file.file_extension,
+                'project_name': file.project_name,
+                'work_order': file.work_order,
+                'workload': file.workload,
+                'upload_time': file.upload_time,
+                'version': file.version,
+            },
+            uploader=file.uploader,
+            employee_id=file.employee_id
+        )
+        # 员工判定与岗位归一
+        role = parsed.role or '未知'
+        if role not in ['设计', '文案', 'PM', 'AE', '内部员工']:
             file.status = 'non_compliant'
+            if hasattr(parsed, 'parse_errors'):
+                file.parse_errors = str(parsed.parse_errors)
+            else:
+                file.parse_errors = f"非内部员工/外部客户/未知岗位，role={role}，文件名={file.original_name}"
+            update_count += 1
+            continue
+        # 字段归一与兜底
+        file.status = 'compliant'
+        file.role = role
+        file.output_type = parsed.output_type or '其他'
+        file.business_unit = parsed.business_unit or None
+        if hasattr(parsed, 'extra') and 'quantity' in parsed.extra:
+            try:
+                file.quantity = float(parsed.extra['quantity'])
+            except Exception:
+                file.quantity = 1.0
+                if hasattr(parsed, 'parse_errors'):
+                    file.parse_errors = str(parsed.parse_errors) + f"; quantity 字段无法转为 float，原始值: {parsed.extra['quantity']}"
+        else:
+            file.quantity = 1.0
+        # 项目名归类
+        proj = (parsed.project_name or '').lower().replace('项目', '').replace(' ', '')
+        best_match = None
+        for pn in project_names:
+            if proj in pn or pn in proj:
+                best_match = project_name_map[pn]
+                break
+        if best_match:
+            file.project_name = best_match
+        elif parsed.project_name:
+            file.project_name = parsed.project_name
+        # parse_errors 记录
+        if hasattr(parsed, 'parse_errors'):
+            file.parse_errors = str(parsed.parse_errors)
         update_count += 1
     session.commit()
-    print(f"已批量修正合规状态和项目名，共处理 {update_count} 条文件记录")
+    print(f"已批量修正合规状态和项目名，共处理 {update_count} 条文件记录（ParserService归一）")
 
     # 2. 统计同一任务多版本的工时（按项目+工单+作者分组，取最早和最晚上传时间差）
     print("正在统计工时...")
