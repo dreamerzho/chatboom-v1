@@ -158,9 +158,53 @@ def batch_import_assets():
     session.commit()
     print("[后处理] 终稿标记已完成。")
 
+def sync_assets_to_workload_records():
+    print("=== 从 assets 表同步数据到 workload_records 表 ===")
+    from backend.models.workload import WorkloadRecord
+    session = db.session
+    assets = Asset.query.all()
+    count, skip, error = 0, 0, 0
+    for a in assets:
+        try:
+            # 通过 original_name + project_id 匹配 file_records.id
+            fr = FileRecord.query.filter_by(original_name=a.original_name, project_id=a.project_id).first()
+            if not fr:
+                print(f"[WARN] 未找到 file_record 匹配: {a.original_name}, project_id={a.project_id}")
+                skip += 1
+                continue
+            exists = WorkloadRecord.query.filter_by(related_file_id=fr.id).first()
+            if exists:
+                skip += 1
+                continue
+            wr = WorkloadRecord(
+                employee_id=a.author_id,
+                project_id=a.project_id,
+                date=a.submission_date or datetime.utcnow().date(),
+                role=a.author_abbreviation or '未知',
+                output_type=a.file_type or '未知',
+                output_value=a.original_name or '',
+                we_value=a.workload_equivalent or 0,
+                is_final=getattr(a, 'is_final_version', False),
+                is_iteration=False,
+                iteration_count=getattr(a, 'version', 1),
+                related_file_id=fr.id,
+                business_unit='',
+                quantity=1,
+                created_at=a.created_at or datetime.utcnow()
+            )
+            session.add(wr)
+            count += 1
+        except Exception as e:
+            error += 1
+            print(f"[ERROR] 跳过asset: {a.original_name}, 错误: {str(e)}")
+            continue
+    session.commit()
+    print(f"同步完成: 新增 {count} 条, 跳过已存在 {skip} 条, 错误 {error} 条")
+
 if __name__ == '__main__':
     app = Flask(__name__)
     app.config.from_object(Config)
     db.init_app(app)
     with app.app_context():
-        batch_import_assets() 
+        batch_import_assets()
+        sync_assets_to_workload_records() 
